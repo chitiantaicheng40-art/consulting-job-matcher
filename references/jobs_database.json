@@ -1,0 +1,26 @@
+[
+  {
+    "company": "Accenture",
+    "position_name": "Salesforce Consultant",
+    "job_code": "ACN-001",
+    "location": "Tokyo",
+    "required_skills": ["Salesforce", "CRM"],
+    "level": "Consultant"
+  },
+  {
+    "company": "PwC",
+    "position_name": "SAP Consultant",
+    "job_code": "PWC-002",
+    "location": "Tokyo",
+    "required_skills": ["SAP", "ERP"],
+    "level": "Senior Consultant"
+  },
+  {
+    "company": "Deloitte",
+    "position_name": "Technology Consultant",
+    "job_code": "DTC-003",
+    "location": "Tokyo",
+    "required_skills": ["AWS", "PM"],
+    "level": "Consultant"
+  }
+]
