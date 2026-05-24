@@ -657,44 +657,6 @@ function writeFetchLog(logs) {
     )
   );
 }
-function validateBeforeSave(job) {
-  const next = { ...job };
-
-  const musts =
-    next.mustRequirements ||
-    next.requiredRequirements ||
-    next.requirements ||
-    next.required_skills ||
-    [];
-
-  const hasMusts = Array.isArray(musts)
-    ? musts.length > 0
-    : String(musts || "").trim().length > 0;
-
-  const hasMustEvidence =
-    next.mustRequirements_source_text ||
-    next.required_source_text ||
-    next.source_text ||
-    (
-      next.required_evidence &&
-      Object.keys(next.required_evidence).length > 0
-    );
-
-  if (hasMusts && !hasMustEvidence) {
-    next.extractionWarning = "必須条件の根拠文が不足しています。要確認。";
-  }
-
-  if (
-    next.location &&
-    next.location !== "Unknown" &&
-    next.location !== "要確認" &&
-    !next.location_source_text
-  ) {
-    next.locationWarning = "勤務地の根拠文が不足しています。要確認。";
-  }
-
-  return next;
-}
 
 function writeJobsCache(jobs) {
   let existingJobs = [];
@@ -711,12 +673,10 @@ function writeJobsCache(jobs) {
   const merged = [];
   const seen = new Set();
 
-  for (const rawJob of [...existingJobs, ...jobs]) {
-    const job = validateBeforeSave(rawJob);
-
+  for (const job of [...existingJobs, ...jobs]) {
     const key = [
       job.company || "",
-      job.position || job.title || job.name || "",
+      job.position || "",
       job.url || ""
     ].join("_").toLowerCase();
 
@@ -741,6 +701,7 @@ function writeJobsCache(jobs) {
 
   console.log(`jobs cache merged: old ${existingJobs.length}, new ${jobs.length}, total ${merged.length}`);
 }
+
 
 
 function extractTitleFromPageText(text, url) {
@@ -2184,7 +2145,7 @@ function extractAbeamOfficialJobFromHtml(url, html) {
 
 
 // ===== Abeam専用：手動URL追加時に公式見出しベースで上書き =====
-app.post("/add-job-urls-abeam-disabled", async (req, res, next) => {
+app.post("/add-job-urls", async (req, res, next) => {
   try {
     const input = String(req.body?.urls || "");
     const urls = input
@@ -2194,7 +2155,7 @@ app.post("/add-job-urls-abeam-disabled", async (req, res, next) => {
 
     const hasAbeam = urls.some(u => u.includes("hrmos.co/pages/abeamconsulting"));
 
-    return next();
+    if (!hasAbeam) return next();
 
     const fs = require("fs");
     const path = require("path");
@@ -2238,102 +2199,22 @@ app.post("/add-job-urls-abeam-disabled", async (req, res, next) => {
           continue;
         }
 
-       
-       const existingIndex = cache.jobs.findIndex(
-  j =>
-    String(j.url || "").trim() ===
-    String(url).trim()
-);
+        const existingIndex = cache.jobs.findIndex(j => String(j.url || "").trim() === String(url).trim());
 
-if (existingIndex >= 0) {
+        if (existingIndex >= 0) {
+          cache.jobs[existingIndex] = {
+            ...cache.jobs[existingIndex],
+            ...job,
+            updatedAt: new Date().toISOString()
+          };
+        } else {
+          cache.jobs.push({
+            ...job,
+            addedAt: new Date().toISOString()
+          });
+        }
 
-  const oldJob = cache.jobs[existingIndex];
-
-  cache.jobs[existingIndex] = {
-    company: job.company || oldJob.company,
-    position: job.position || job.title || "要確認",
-    title: job.title || job.position || "要確認",
-    url,
-
-    mustRequirements:
-      Array.isArray(job.mustRequirements)
-        ? job.mustRequirements
-        : [],
-
-    preferredRequirements:
-      Array.isArray(job.preferredRequirements)
-        ? job.preferredRequirements
-        : [],
-
-    domains:
-      Array.isArray(job.domains)
-        ? job.domains
-        : [],
-
-    source:
-      job.source || oldJob.source,
-
-    updatedAt:
-      new Date().toISOString()
-  };
-
-} else {
-
-  cache.jobs.push({
-    company:
-      job.company || "Unknown",
-
-    position:
-      job.position ||
-      job.title ||
-      "要確認",
-
-    title:
-      job.title ||
-      job.position ||
-      "要確認",
-
-    url,
-
-    mustRequirements:
-      Array.isArray(job.mustRequirements)
-        ? job.mustRequirements
-        : [],
-
-    preferredRequirements:
-      Array.isArray(job.preferredRequirements)
-        ? job.preferredRequirements
-        : [],
-
-    domains:
-      Array.isArray(job.domains)
-        ? job.domains
-        : [],
-
-    source:
-      job.source ||
-      "manual",
-
-    addedAt:
-      new Date().toISOString()
-  });
-
-}
-
-const score = [
-  job.title || job.position,
-  job.mustRequirements?.length > 0,
-  job.preferredRequirements?.length > 0,
-  job.domains?.length > 0
-].filter(Boolean).length;
-
-console.log(
-  `[QUALITY] ${score}/4`,
-  url
-);
-
-addedJobs.push(job);
-
+        addedJobs.push(job);
       } catch (e) {
         errors.push({ url, message: e.message });
       }
@@ -2528,39 +2409,7 @@ app.post("/add-job-urls", async (req, res) => {
         errors
       });
     }
-for (const job of addedJobs) {
-  const musts =
-    job.mustRequirements ||
-    job.requiredRequirements ||
-    job.requirements ||
-    job.required_skills ||
-    [];
 
-  const welcomes =
-    job.preferredRequirements ||
-    job.preferred_skills ||
-    [];
-
-  const domains =
-    job.domains ||
-    job.role_keywords ||
-    [];
-
-  const score = [
-    job.title || job.position,
-    Array.isArray(musts) ? musts.length > 0 : String(musts || "").trim().length > 0,
-    Array.isArray(welcomes) ? welcomes.length > 0 : String(welcomes || "").trim().length > 0,
-    Array.isArray(domains) ? domains.length > 0 : String(domains || "").trim().length > 0
-  ].filter(Boolean).length;
-
-  job.qualityScore = score;
-  job.qualityStatus = score >= 3 ? "利用可" : "要確認";
-
-  console.log(
-    `[QUALITY] ${score}/4 ${job.qualityStatus}`,
-    job.url
-  );
-}
     writeJobsCache(addedJobs);
 
     res.json({

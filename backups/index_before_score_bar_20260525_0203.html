@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>Consulting Job Matcher</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f7fb;
+      color: #111827;
+      margin: 0;
+      padding: 40px;
+    }
+    h1 { font-size: 56px; margin: 0 0 32px; }
+    h2 { font-size: 26px; margin-top: 0; }
+    h3 { font-size: 22px; margin-top: 32px; }
+    .card {
+      background: white;
+      border-radius: 20px;
+      padding: 28px;
+      margin: 24px 0;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, .06);
+    }
+    textarea, input[type="file"] {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #d1d5db;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 15px;
+      background: white;
+    }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 14px 24px;
+      font-size: 16px;
+      font-weight: 700;
+      color: white;
+      background: #2563eb;
+      cursor: pointer;
+      margin: 12px 8px 0 0;
+    }
+    button.red { background: #dc2626; }
+    button.dark { background: #111827; }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 10px 0;
+      gap: 16px;
+    }
+    .badge {
+      display: inline-block;
+      background: #dcfce7;
+      color: #166534;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-weight: 700;
+      font-size: 14px;
+      margin-left: 8px;
+    }
+    .job {
+      padding: 16px;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      background: #f9fafb;
+      margin-top: 12px;
+      line-height: 1.7;
+    }
+    a { color: #2563eb; font-weight: 700; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>Consulting Job Matcher</h1>
+
+  <section class="card">
+    <h2>求人URL手動追加</h2>
+    <p>自動取得できなかった求人詳細URLを1行ずつ貼り付けてください。</p>
+    <textarea id="manualJobUrls" rows="5" placeholder="https://example.com/job/001&#10;https://example.com/job/002"></textarea>
+    <br />
+    <button onclick="addManualJobUrls()">求人URLから追加</button>
+    <div id="manualJobUrlResult"></div>
+  </section>
+
+  <section class="card">
+    <h2>求人データ管理</h2>
+    <div id="cacheStatus">キャッシュ確認中...</div>
+    <button onclick="loadCacheStatus()">求人データ状態を確認</button>
+    <button onclick="showLogs()">取得ログを見る</button>
+    <button class="red" onclick="refreshJobs()">最新求人データに更新</button>
+    <button onclick="loadJobList()">取得済み求人一覧を見る</button>
+    <div id="jobList"></div>
+  </section>
+
+  <section class="card">
+    <h2>職務経歴書PDFアップロード</h2>
+    <input type="file" id="resumeFile" accept="application/pdf" />
+    <br />
+    <button class="dark" onclick="matchResume()">PDF解析してマッチング</button>
+    <button onclick="matchResumeWithRefresh()">最新求人で再取得してマッチング</button>
+    <div id="matchResult"></div>
+  </section>
+
+<script>
+function toJobs(data) {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.jobs)) return data.jobs;
+  return [];
+}
+
+function flatten(value) {
+  const out = [];
+  function walk(v) {
+    if (!v) return;
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (typeof v === "object") return Object.values(v).forEach(walk);
+    const s = String(v).trim();
+    if (s) out.push(s);
+  }
+  walk(value);
+  return out;
+}
+
+function cleanJoin(values) {
+  const cleaned = Array.from(new Set(
+    values
+      .flatMap(v => String(v).split(/[;\n]/))
+      .map(v => v.trim())
+      .filter(Boolean)
+      .filter(v => v !== "なし")
+      .filter(v => !v.startsWith("http"))
+  ));
+  return cleaned.length ? cleaned.join("、") : "なし";
+}
+
+function pick(job, keys) {
+  const values = [];
+  for (const key of keys) {
+    if (job[key]) values.push(...flatten(job[key]));
+  }
+  return cleanJoin(values);
+}
+
+function mustText(job) {
+  return pick(job, [
+    "mustRequirements",
+    "requiredRequirements",
+    "requirements",
+    "requiredSkills",
+    "required_skills",
+    "mustSkills",
+    "necessaryRequirements",
+    "requiredExperience",
+    "requiredQualifications",
+    "requiredConditions",
+    "must",
+    "required",
+    "応募資格",
+    "応募条件",
+    "必須要件",
+    "必須条件",
+    "必要経験",
+    "求める経験",
+    "登録資格"
+  ]);
+}
+
+function welcomeText(job) {
+  return pick(job, [
+    "preferredRequirements",
+    "welcomeRequirements",
+    "niceToHave",
+    "preferredSkills",
+    "preferred_skills",
+    "welcomeSkills",
+    "wantRequirements",
+    "歓迎要件",
+    "歓迎条件",
+    "歓迎経験",
+    "尚可",
+    "preferred",
+    "welcome",
+    "nice"
+  ]);
+}
+
+function domainText(job) {
+  return pick(job, [
+    "domains",
+    "domain",
+    "area",
+    "areas",
+    "category",
+    "categories",
+    "領域",
+    "業務領域",
+    "service",
+    "services",
+    "role_keywords",
+    "industry",
+    "mainExp",
+    "location"
+  ]);
+}
+
+function isThinJob(job) {
+  const title = String(job.position || job.title || job.name || "");
+  const must = mustText(job);
+  const welcome = welcomeText(job);
+  const all = `${title}\n${must}\n${welcome}\n${domainText(job)}`;
+
+  const thinTitles = [
+    "Salesforceコンサルタント",
+    "ServiceNowコンサルタント",
+    "AWS エンジニア",
+    "AI・データエンジニア",
+    "Customer & Marketing w/Salesforce",
+    "Technology Strategy & Transformation w/ServiceNow",
+    "Engineering w/AWS",
+    "AI & Data"
+  ];
+
+  if (thinTitles.some(t => title.includes(t))) return true;
+
+  const mustItems = must === "なし" ? [] : must.split(/[、,\n]/).map(v => v.trim()).filter(Boolean);
+  const hasNoWelcome = welcome === "なし";
+  const shortMust = mustItems.length <= 1 && must.length < 45;
+  const keywordOnly = /Salesforce|ServiceNow|AWS|AI|Data|CRM|DX/.test(all);
+  const hasRealDetail = /複数年|プロジェクト|マネージャー|コンサルティング経験|業務経験|企画|要件定義|設計|導入支援|PM|PMO/.test(all);
+
+  return shortMust && hasNoWelcome && keywordOnly && !hasRealDetail;
+}
+
+async function fetchJobs() {
+  const res = await fetch("/jobs-cache");
+  const data = await res.json();
+  return { data, jobs: toJobs(data).filter(job => !isThinJob(job)) };
+}
+
+async function loadCacheStatus() {
+  const statusDiv = document.getElementById("cacheStatus");
+  statusDiv.innerHTML = "読み込み中...";
+
+  try {
+    const { data, jobs } = await fetchJobs();
+    const counts = {};
+
+    for (const job of jobs) {
+      const company = job.company || "Unknown";
+      counts[company] = (counts[company] || 0) + 1;
+    }
+
+    const rows = Object.keys(counts).sort().map(company => `
+      <div class="row"><span>${company}</span><strong>${counts[company]}件</strong></div>
+    `).join("");
+
+    const date = data.createdAt ? new Date(data.createdAt).toLocaleString("ja-JP") : "不明";
+
+    statusDiv.innerHTML = `
+      <span class="badge">キャッシュあり</span>
+      <div class="row"><span>最終更新</span><strong>${date}</strong></div>
+      <div class="row"><span>求人件数</span><strong>${jobs.length}件</strong></div>
+      <div style="margin-top:16px;"><strong>会社別件数</strong>${rows || "<p>会社別件数なし</p>"}</div>
+    `;
+  } catch (e) {
+    console.error(e);
+    statusDiv.innerHTML = "取得エラー";
+  }
+}
+
+async function loadJobList() {
+  const jobListDiv = document.getElementById("jobList");
+  jobListDiv.innerHTML = "<p>取得済み求人を読み込み中...</p>";
+
+  try {
+    const { jobs } = await fetchJobs();
+
+    const grouped = {};
+    for (const job of jobs) {
+      const company = job.company || "Unknown";
+      if (!grouped[company]) grouped[company] = [];
+      grouped[company].push(job);
+    }
+
+    const html = Object.keys(grouped).sort().map(company => {
+      const rows = grouped[company].map((job, index) => `
+        <div class="job">
+          <div>
+            <strong>${index + 1}. ${job.position || job.title || job.name || "職種名なし"}</strong>
+            <span class="badge">利用可</span>
+          </div>
+          <div style="margin-top:6px;color:#6b7280;">確認ポイント：なし</div>
+          <p><strong>必須要件：</strong> ${mustText(job)}</p>
+          <p><strong>歓迎要件：</strong> ${welcomeText(job)}</p>
+          <p><strong>領域：</strong> ${domainText(job)}</p>
+          ${job.url ? `<p><a href="${job.url}" target="_blank">求人詳細を見る →</a></p>` : ""}
+        </div>
+      `).join("");
+
+      return `<h3>${company}：${grouped[company].length}件</h3>${rows}`;
+    }).join("");
+
+    jobListDiv.innerHTML = `<h2>取得済み求人一覧</h2><p>合計：${jobs.length}件</p>${html}`;
+  } catch (e) {
+    console.error(e);
+    jobListDiv.innerHTML = "<p>取得済み求人一覧の読み込みに失敗しました。</p>";
+  }
+}
+
+async function addManualJobUrls() {
+  const textarea = document.getElementById("manualJobUrls");
+  const resultDiv = document.getElementById("manualJobUrlResult");
+  const urls = textarea.value;
+
+  if (!urls.trim()) {
+    resultDiv.innerHTML = "<p>URLを入力してください。</p>";
+    return;
+  }
+
+  resultDiv.innerHTML = "<p>求人URLを解析中です。</p>";
+
+  try {
+    const res = await fetch("/add-job-urls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urls })
+    });
+
+    const data = await res.json();
+    const jobs = data.jobs || [];
+
+    resultDiv.innerHTML = `
+      <p>${jobs.length}件の求人を追加しました。</p>
+      ${jobs.map(job => `
+        <div class="job">
+          <strong>${job.company || ""} / ${job.position || job.title || "職種名なし"}</strong>
+          <p><strong>必須要件：</strong> ${mustText(job)}</p>
+          ${job.url ? `<p><a href="${job.url}" target="_blank">求人詳細を見る →</a></p>` : ""}
+        </div>
+      `).join("")}
+    `;
+
+    await loadCacheStatus();
+  } catch (e) {
+    console.error(e);
+    resultDiv.innerHTML = "<p>追加に失敗しました。</p>";
+  }
+}
+
+async function refreshJobs() {
+  const statusDiv = document.getElementById("cacheStatus");
+  statusDiv.innerHTML = "求人データ更新中...";
+
+  try {
+    await fetch("/refresh-jobs", { method: "POST" });
+    await loadCacheStatus();
+  } catch (e) {
+    console.error(e);
+    statusDiv.innerHTML = "更新エラー";
+  }
+}
+
+async function showLogs() {
+  alert("ログ確認はターミナル側で fetch_logs.json / server.log を確認してください。");
+}
+
+async function matchResume() {
+  const file =
+    document.getElementById("resumeFile")?.files?.[0];
+
+  if (!file) {
+    alert("PDFを選択してください");
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append("resume", file);
+
+  const res = await fetch("/upload-resume", {
+    method: "POST",
+    body: fd
+  });
+
+  const data = await res.json();
+
+const rankOrder = {
+  "S": 4,
+  "A": 3,
+  "B": 2,
+  "C": 1
+};
+
+const topMatches = (data.matches || [])
+  .slice()
+  .sort((a, b) => {
+    const ar = rankOrder[String(a.rank || "").slice(0, 1)] || 0;
+    const br = rankOrder[String(b.rank || "").slice(0, 1)] || 0;
+
+    if (br !== ar) return br - ar;
+    return (b.score || 0) - (a.score || 0);
+  })
+  .slice(0, 10);
+
+document.getElementById("matchResult").innerHTML =
+`
+<h2>マッチング結果 TOP10</h2>
+
+<div style="margin:12px 0; padding:12px; background:#f8fafc; border-radius:12px;">
+  <strong>候補者：</strong>${data.candidate?.name || "候補者"}<br>
+  <strong>対象求人：</strong>${data.usableJobsCount || 0}件 / 全${data.jobsCount || 0}件
+</div>
+
+${topMatches.map((m, i) => `
+  <div style="border:1px solid #e5e7eb; border-radius:14px; padding:16px; margin:14px 0; background:white;">
+    <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+      <h3 style="margin:0;">${i===0?"🥇":i===1?"🥈":i===2?"🥉":"🏅"} ${i + 1}. ${m.company || "-"} / ${m.position || "-"}</h3> 
+      <span style="background:#dbeafe; color:#1d4ed8; padding:6px 10px; border-radius:999px; font-weight:700;">
+        ${m.score ?? "-"}点
+      </span>
+    </div>
+
+    <p><strong>ランク：</strong>${m.rank || "-"}　<strong>書類通過可能性：</strong>${m.documentPassLikelihood || "-"}</p>
+    <p><strong>理由：</strong>${m.documentPassReason || "-"}</p>
+    <p><strong>一致した必須条件：</strong>${(m.requiredMatched || []).length ? m.requiredMatched.join("、") : "なし"}</p>
+    <p><strong>不足している必須条件：</strong>${(m.requiredMissing || []).length ? m.requiredMissing.join("、") : "なし"}</p>
+    <p><strong>歓迎条件一致：</strong>${(m.preferredMatched || []).length ? m.preferredMatched.join("、") : "なし"}</p>
+    <p><strong>コメント：</strong>${m.recommendation_comment || "-"}</p>
+
+    <a href="${m.url || "#"}" target="_blank" style="color:#2563eb; font-weight:700;">
+      求人詳細を見る →
+    </a>
+  </div>
+`).join("")}
+
+<details style="margin-top:20px;">
+  <summary>JSON詳細を見る</summary>
+  <pre style="white-space:pre-wrap">
+${JSON.stringify(data, null, 2)}
+  </pre>
+</details>
+`;
+}
+
+window.addEventListener("DOMContentLoaded", loadCacheStatus);
+</script>
+</body>
+</html>

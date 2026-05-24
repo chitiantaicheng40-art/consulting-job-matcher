@@ -1,0 +1,59 @@
+{
+  "createdAt": "2026-05-19T18:09:21.727Z",
+  "logs": [
+    {
+      "company": "Deloitte",
+      "status": "success",
+      "fetchedCount": 43,
+      "message": "Deloitte専用crawler取得"
+    },
+    {
+      "company": "Accenture",
+      "status": "success",
+      "fetchedCount": 8,
+      "message": "Accenture専用crawler取得"
+    },
+    {
+      "company": "PwC",
+      "status": "error",
+      "fetchedCount": 0,
+      "message": "unable to verify the first certificate"
+    },
+    {
+      "company": "Accenture",
+      "status": "success",
+      "fetchedCount": 0,
+      "message": "取得完了"
+    },
+    {
+      "company": "Deloitte",
+      "status": "success",
+      "fetchedCount": 0,
+      "message": "取得完了"
+    },
+    {
+      "company": "Deloitte",
+      "status": "success",
+      "fetchedCount": 0,
+      "message": "取得完了"
+    },
+    {
+      "company": "KPMG",
+      "status": "success",
+      "fetchedCount": 31,
+      "message": "取得完了"
+    },
+    {
+      "company": "Abeam Consulting",
+      "status": "success",
+      "fetchedCount": 56,
+      "message": "取得完了"
+    },
+    {
+      "company": "Fortience",
+      "status": "success",
+      "fetchedCount": 3,
+      "message": "取得完了"
+    }
+  ]
+}

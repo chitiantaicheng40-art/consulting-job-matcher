@@ -22,5 +22,29 @@
     "location": "Tokyo",
     "required_skills": ["AWS", "PM"],
     "level": "Consultant"
+  },
+  {
+    "company": "KPMG",
+    "position_name": "DX Consultant",
+    "job_code": "KPMG-001",
+    "location": "Tokyo",
+    "required_skills": ["DX", "PM"],
+    "level": "Consultant"
+  },
+  {
+    "company": "ABeam",
+    "position_name": "Business Consultant",
+    "job_code": "ABM-001",
+    "location": "Tokyo",
+    "required_skills": ["PM"],
+    "level": "Consultant"
+  },
+  {
+    "company": "Fortience",
+    "position_name": "IT Strategy Consultant",
+    "job_code": "FOR-001",
+    "location": "Tokyo",
+    "required_skills": ["AWS"],
+    "level": "Senior Consultant"
   }
 ]

@@ -2528,39 +2528,7 @@ app.post("/add-job-urls", async (req, res) => {
         errors
       });
     }
-for (const job of addedJobs) {
-  const musts =
-    job.mustRequirements ||
-    job.requiredRequirements ||
-    job.requirements ||
-    job.required_skills ||
-    [];
 
-  const welcomes =
-    job.preferredRequirements ||
-    job.preferred_skills ||
-    [];
-
-  const domains =
-    job.domains ||
-    job.role_keywords ||
-    [];
-
-  const score = [
-    job.title || job.position,
-    Array.isArray(musts) ? musts.length > 0 : String(musts || "").trim().length > 0,
-    Array.isArray(welcomes) ? welcomes.length > 0 : String(welcomes || "").trim().length > 0,
-    Array.isArray(domains) ? domains.length > 0 : String(domains || "").trim().length > 0
-  ].filter(Boolean).length;
-
-  job.qualityScore = score;
-  job.qualityStatus = score >= 3 ? "利用可" : "要確認";
-
-  console.log(
-    `[QUALITY] ${score}/4 ${job.qualityStatus}`,
-    job.url
-  );
-}
     writeJobsCache(addedJobs);
 
     res.json({

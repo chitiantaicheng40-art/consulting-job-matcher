@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Consulting Job Matcher</title>
+
+  <style>
+    body { font-family: sans-serif; background:#f3f4f8; margin:0; padding:40px; color:#111827; }
+    h1 { font-size:56px; margin-bottom:32px; }
+    .box,.result-card { background:white; border-radius:24px; padding:32px; margin-bottom:28px; box-shadow:0 2px 8px rgba(0,0,0,.05); }
+    input { width:100%; padding:16px; margin-bottom:16px; border-radius:12px; border:1px solid #d1d5db; font-size:16px; box-sizing:border-box; }
+    button { background:#0f172a; color:white; border:none; padding:14px 24px; border-radius:14px; cursor:pointer; font-size:16px; font-weight:bold; margin-right:8px; }
+    button.secondary { background:#2563eb; }
+    button.danger { background:#dc2626; }
+    pre { white-space:pre-wrap; word-break:break-word; background:#f9fafb; padding:20px; border-radius:12px; overflow-x:auto; }
+
+    .score { color:#2563eb; font-weight:bold; font-size:18px; }
+    .rank-badge,.so-badge,.cache-badge {
+      display:inline-block; padding:6px 12px; border-radius:999px; font-size:14px; font-weight:bold;
+    }
+
+    .rank-s,.so-high { background:#dbeafe; color:#1d4ed8; }
+    .rank-a,.so-mid { background:#dcfce7; color:#166534; }
+    .rank-b { background:#fef3c7; color:#92400e; }
+    .rank-c,.so-low { background:#e5e7eb; color:#374151; }
+    .cache-ok { background:#dcfce7; color:#166534; }
+    .cache-none { background:#fee2e2; color:#991b1b; }
+
+    .recommend-box {
+      background:#eef2ff;
+      border:1px solid #c7d2fe;
+      border-radius:24px;
+      padding:32px;
+      margin-bottom:28px;
+    }
+
+    .recommend-row {
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:16px;
+      padding:18px 0;
+      border-bottom:1px solid #c7d2fe;
+    }
+
+    .recommend-row:last-child { border-bottom:none; }
+
+    .recommend-reason {
+      margin-top:10px;
+      background:#f9fafb;
+      border-radius:12px;
+      padding:12px;
+      color:#111827;
+      font-size:14px;
+      line-height:1.7;
+      border:1px solid #e5e7eb;
+    }
+
+    .matched-box { margin-top:16px; padding:16px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:14px; }
+    .matched-title { color:#166534; font-weight:bold; }
+    .gap-box { margin-top:16px; padding:16px; background:#fff7ed; border:1px solid #fed7aa; border-radius:14px; }
+    .gap-title { color:#c2410c; font-weight:bold; }
+    .so-box { margin-top:16px; padding:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:14px; }
+    .comment-box,.evidence-box,.score-detail,.score-log-box { margin-top:16px; padding:16px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:14px; }
+
+    .score-row,.score-log-row,.cache-row {
+      display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #e5e7eb; gap:16px;
+    }
+
+    .score-row:last-child,.score-log-row:last-child,.cache-row:last-child { border-bottom:none; }
+    .score-log-point { color:#2563eb; font-weight:bold; }
+
+    .evidence-item { margin-top:10px; padding:10px; background:white; border-radius:10px; border:1px solid #e5e7eb; }
+    .evidence-key { font-weight:bold; color:#1d4ed8; }
+    .evidence-text { margin-top:4px; color:#374151; font-size:14px; }
+
+    a { color:#2563eb; text-decoration:none; font-weight:bold; }
+  </style>
+</head>
+
+<body>
+  <h1>Consulting Job Matcher</h1>
+
+<section class="card" id="manualJobUrlSection" style="border:3px solid #2563eb; margin-top:24px;">
+  <h2>求人URL手動追加</h2>
+  <p>自動取得できなかった求人詳細URLを1行ずつ貼り付けてください。</p>
+
+  <textarea
+    id="manualJobUrls"
+    rows="6"
+    placeholder="https://example.com/job/001&#10;https://example.com/job/002"
+    style="
+      width:100%;
+      padding:14px;
+      border:1px solid #d1d5db;
+      border-radius:12px;
+      font-size:15px;
+      margin-top:12px;
+      box-sizing:border-box;
+    "
+  ></textarea>
+
+  <div style="margin-top:16px;">
+    <button class="secondary" onclick="addManualJobUrls()">求人URLから追加</button>
+  </div>
+
+  <div id="manualJobUrlResult" style="margin-top:16px;"></div>
+</section>
+
+
+
+  <div class="box">
+    <h2>求人データ管理</h2>
+    <div id="cacheStatus">キャッシュ確認中...</div>
+    <br />
+    <button class="secondary" onclick="loadCacheStatus()">求人データ状態を確認</button>
+    <button class="secondary" onclick="loadFetchLogs()">取得ログを見る</button>
+    <button class="danger" onclick="refreshJobs()">最新求人データに更新</button>
+<button class="secondary" onclick="loadJobList()">取得済み求人一覧を見る</button>
+<div id="jobList" style="margin-top:20px;"></div>
+    <div id="fetchLogs" style="margin-top:20px;"></div>
+  </div>
+
+  <div class="box">
+    <h2>職務経歴書PDFアップロード</h2>
+    <input type="file" id="resumeFile" accept="application/pdf" />
+    <button onclick="uploadResume(false)">PDF解析してマッチング</button>
+    <button class="secondary" onclick="uploadResume(true)">最新求人で再取得してマッチング</button>
+  </div>
+
+  <div class="box">
+    <h2>手入力テスト</h2>
+    <input type="text" placeholder="名前" />
+    <input type="text" placeholder="スキル（カンマ区切り）" />
+    <input type="text" placeholder="業界" />
+    <input type="text" placeholder="経験年数" />
+    <input type="text" placeholder="勤務地" />
+    <button onclick="manualMatch(false)">手入力でマッチング</button>
+    <button class="secondary" onclick="manualMatch(true)">最新求人で再取得してマッチング</button>
+  </div>
+
+  <div class="box">
+    <h2>抽出された候補者情報</h2>
+    <pre id="candidate">まだ解析されていません</pre>
+  </div>
+
+  <h2>マッチング結果</h2>
+  <div id="results"></div>
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</body>
+</html>
