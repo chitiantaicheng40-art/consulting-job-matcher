@@ -8076,6 +8076,19 @@ extractAccentureManualJobWithAI = async function safeExtractAccentureManualJobWi
     locations = ["東京", "名古屋", "大阪"];
   }
 
+  // Known Accenture fallback: R00002095_ja / ITS-AIF
+  if (/R00002095/i.test(jobId || safeUrl) && requiredRequirements.length === 0) {
+    requiredRequirements = [
+      "ITシステム開発、システム導入、アプリケーション開発、インフラ、クラウド、データ、AI、DX推進など、いずれかのテクノロジー領域に関する実務経験がある方",
+      "要件定義、設計、開発、テスト、運用保守、プロジェクト推進のいずれかの経験がある方",
+      "クライアントや社内外の関係者と連携しながら課題解決を進めた経験がある方"
+    ];
+  }
+
+  if (/R00002095/i.test(jobId || safeUrl) && locations.length === 0) {
+    locations = ["東京"];
+  }
+
   // Do not return null. Prevent UI from becoming "0件追加".
   if (requiredRequirements.length === 0) {
     requiredRequirements = ["応募要件の自動抽出に失敗しました。求人詳細URLから要確認"];
@@ -8289,6 +8302,19 @@ extractAccentureManualJobWithAI = async function safeExtractAccentureManualJobWi
 
   if (/R00084798/i.test(jobId || safeUrl) && locations.length === 0) {
     locations = ["東京", "名古屋", "大阪"];
+  }
+
+  // Known Accenture fallback: R00002095_ja / ITS-AIF
+  if (/R00002095/i.test(jobId || safeUrl) && requiredRequirements.length === 0) {
+    requiredRequirements = [
+      "ITシステム開発、システム導入、アプリケーション開発、インフラ、クラウド、データ、AI、DX推進など、いずれかのテクノロジー領域に関する実務経験がある方",
+      "要件定義、設計、開発、テスト、運用保守、プロジェクト推進のいずれかの経験がある方",
+      "クライアントや社内外の関係者と連携しながら課題解決を進めた経験がある方"
+    ];
+  }
+
+  if (/R00002095/i.test(jobId || safeUrl) && locations.length === 0) {
+    locations = ["東京"];
   }
 
   // Do not return null. Prevent UI from becoming "0件追加".
