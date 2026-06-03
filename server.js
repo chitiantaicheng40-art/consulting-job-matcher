@@ -9300,8 +9300,46 @@ if (typeof buildMatches === "function" && !global.__ROLE_FIT_SCORING_PATCH_APPLI
     const candidateHasSap = __hasAny(candidateText, [/SAP/i, /S\/4HANA/i, /ABAP/i]);
     const candidateHasSalesforce = __hasAny(candidateText, [/Salesforce/i, /SFDC/i]);
     const candidateHasServiceNow = __hasAny(candidateText, [/ServiceNow/i]);
-    const candidateHasOracleErp = __hasAny(candidateText, [/Oracle\s*ERP/i, /Oracle\s*Cloud/i, /Oracle\s*EBS/i, /E-Business Suite/i]);
-    const candidateHasErp = __hasAny(candidateText, [/ERP/i, /基幹システム/, /SAP/i, /Oracle\s*ERP/i]);
+    // Strict distinction:
+    // "Oracle" alone often means DB usage. Do NOT treat it as Oracle Fusion / ERP / EPM / OCI implementation.
+    const candidateHasOracleFusion = __hasAny(candidateText, [
+      /Oracle\s*Fusion/i,
+      /Fusion\s*Cloud/i,
+      /Oracle\s*Cloud\s*ERP/i,
+      /Oracle\s*ERP/i,
+      /Oracle\s*EPM/i,
+      /Oracle\s*SCM/i,
+      /Oracle\s*HCM/i,
+      /Oracle\s*EBS/i,
+      /E-Business Suite/i,
+      /OCI/i,
+      /Oracle\s*Cloud\s*Infrastructure/i,
+      /Oracle.*導入/i,
+      /Oracle.*要件定義/i,
+      /Oracle.*移行/i,
+      /Oracle.*実装/i
+    ]);
+
+    const candidateHasOracleDbOnly = __hasAny(candidateText, [
+      /Oracle/i,
+      /Oracle\s*Database/i,
+      /SQL/i,
+      /DB/i,
+      /データベース/i
+    ]) && !candidateHasOracleFusion;
+
+    const candidateHasOracleErp = candidateHasOracleFusion;
+
+    const candidateHasErp = __hasAny(candidateText, [
+      /ERP/i,
+      /基幹システム/,
+      /SAP/i,
+      /S\/4HANA/i,
+      /Oracle\s*ERP/i,
+      /Oracle\s*Fusion/i,
+      /Fusion\s*Cloud/i,
+      /EPM/i
+    ]);
 
     // Job category signals
     const isSalesAllianceJob = __hasAny(jobText, [
@@ -9348,8 +9386,34 @@ if (typeof buildMatches === "function" && !global.__ROLE_FIT_SCORING_PATCH_APPLI
     const isSapJob = __hasAny(jobText, [/SAP/i, /S\/4HANA/i, /ABAP/i]);
     const isSalesforceJob = __hasAny(jobText, [/Salesforce/i, /SFDC/i]);
     const isServiceNowJob = __hasAny(jobText, [/ServiceNow/i]);
-    const isOracleErpJob = __hasAny(jobText, [/Oracle\s*ERP/i, /Oracle\s*Cloud/i, /Oracle\s*EBS/i, /E-Business Suite/i]);
-    const isErpJob = __hasAny(jobText, [/ERP/i, /基幹システム導入/, /SAP/i, /Oracle\s*ERP/i]);
+    const isOracleFusionJob = __hasAny(jobText, [
+      /Oracle\s*Fusion/i,
+      /Fusion\s*Cloud/i,
+      /Oracle\s*Cloud\s*ERP/i,
+      /Oracle\s*ERP/i,
+      /Oracle\s*EPM/i,
+      /Oracle\s*SCM/i,
+      /Oracle\s*HCM/i,
+      /Oracle\s*EBS/i,
+      /E-Business Suite/i,
+      /Oracle\s*Cloud\s*Infrastructure/i,
+      /OCI/i,
+      /Enterprise Transformation.*Oracle/i,
+      /Oracle領域/
+    ]);
+
+    const isOracleErpJob = isOracleFusionJob;
+
+    const isErpJob = __hasAny(jobText, [
+      /ERP/i,
+      /基幹システム導入/,
+      /SAP/i,
+      /S\/4HANA/i,
+      /Oracle\s*ERP/i,
+      /Oracle\s*Fusion/i,
+      /Fusion\s*Cloud/i,
+      /EPM/i
+    ]);
 
     // 1. Strong penalty: sales/alliance jobs without sales experience.
     if (isSalesAllianceJob && !candidateHasSalesExperience) {
@@ -9379,9 +9443,14 @@ if (typeof buildMatches === "function" && !global.__ROLE_FIT_SCORING_PATCH_APPLI
       notes.push("ServiceNow求人ですが、候補者に具体経験が確認できないため減点しました。");
     }
 
-    if (isOracleErpJob && !candidateHasOracleErp) {
-      penalty += 18;
-      notes.push("Oracle ERP/Oracle Cloud求人ですが、候補者のOracle経験がDB利用に留まる可能性があるため、ERP/Cloud導入経験としては加点しすぎない判定にしています。");
+    if (isOracleFusionJob && !candidateHasOracleFusion) {
+      penalty += 35;
+
+      if (candidateHasOracleDbOnly) {
+        notes.push("Oracle専門求人ですが、候補者のOracle経験はDB/SQL利用に留まる可能性が高く、Oracle Fusion Cloud / ERP / EPM / OCI導入経験としては扱わないため大幅減点しました。");
+      } else {
+        notes.push("Oracle Fusion Cloud / ERP / EPM / OCI求人ですが、候補者に該当製品の導入・移行・要件定義経験が確認できないため大幅減点しました。");
+      }
     }
 
     if (isErpJob && !candidateHasErp) {
@@ -9397,6 +9466,10 @@ if (typeof buildMatches === "function" && !global.__ROLE_FIT_SCORING_PATCH_APPLI
 
     // 5. If job is sales and current match reason only comes from tech keywords, cap score.
     if (isSalesAllianceJob && !candidateHasSalesExperience) {
+      const capped = Math.min(score - penalty + bonus, 29);
+      score = capped;
+    } else if (isOracleFusionJob && !candidateHasOracleFusion) {
+      // Oracle DB usage alone must not rank high for Oracle Fusion/ERP/EPM/OCI specialist roles.
       const capped = Math.min(score - penalty + bonus, 29);
       score = capped;
     } else {
