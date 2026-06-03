@@ -9122,3 +9122,321 @@ function toSafeDisplayList(value) {
     .filter((v, i, self) => self.indexOf(v) === i);
 }
 // ===== End Utility =====
+
+// ===== FINAL OVERRIDE: role-fit scoring adjustment =====
+// Purpose:
+// - Reduce false positives where IT delivery candidates match sales/alliance jobs only by tech keywords.
+// - Distinguish technical usage experience from sales/alliance selling experience.
+// - Boost IT/PM/cloud/business-system jobs for SIer / delivery / cloud migration candidates.
+if (typeof buildMatches === "function" && !global.__ROLE_FIT_SCORING_PATCH_APPLIED__) {
+  global.__ROLE_FIT_SCORING_PATCH_APPLIED__ = true;
+
+  const __prevBuildMatches_roleFit = buildMatches;
+
+  function __safeTextForRoleFit(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__safeTextForRoleFit).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__safeTextForRoleFit).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __hasAny(text, patterns) {
+    const s = String(text || "");
+    return patterns.some(p => p.test(s));
+  }
+
+  function __getMatchJob(match) {
+    return match?.job || match?.jobData || match?.originalJob || match;
+  }
+
+  function __getScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __setScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __updateRankAndPass(match) {
+    const score = __getScore(match);
+
+    if (score >= 70) {
+      match.rank = "A";
+      match.priority = match.priority || "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+    } else if (score >= 50) {
+      match.rank = "B";
+      match.priority = match.priority || "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+    } else if (score >= 30) {
+      match.rank = "C";
+      match.priority = "優先低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    } else {
+      match.rank = "D";
+      match.priority = "対象外寄り";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    }
+
+    return match;
+  }
+
+  function __appendComment(match, text) {
+    if (!text) return match;
+
+    const current = match.comment || match.reason || "";
+    const add = String(text).trim();
+
+    if (!current) {
+      match.comment = add;
+      match.reason = add;
+      return match;
+    }
+
+    if (!String(current).includes(add)) {
+      match.comment = `${current} ${add}`;
+      match.reason = match.reason ? `${match.reason} ${add}` : match.comment;
+    }
+
+    return match;
+  }
+
+  function __roleFitAdjustMatch(match, candidate) {
+    const job = __getMatchJob(match);
+
+    const candidateText = __safeTextForRoleFit(candidate);
+    const jobText = __safeTextForRoleFit(job);
+    const matchText = __safeTextForRoleFit(match);
+
+    let score = __getScore(match);
+    let penalty = 0;
+    let bonus = 0;
+    const notes = [];
+
+    // Candidate signals
+    const candidateHasSalesExperience = __hasAny(candidateText, [
+      /法人営業/,
+      /ソリューション営業/,
+      /IT営業/,
+      /プリセールス/,
+      /アカウント営業/,
+      /アカウントマネジメント/,
+      /アライアンス営業/,
+      /パートナー営業/,
+      /販売実績/,
+      /営業戦略/,
+      /セリング/,
+      /クロージング/,
+      /売上責任/,
+      /営業担当/,
+      /営業経験/,
+      /sales/i,
+      /pre.?sales/i,
+      /account\s?manager/i,
+      /alliance/i
+    ]);
+
+    const candidateHasDeliveryExperience = __hasAny(candidateText, [
+      /SIer/i,
+      /システムインテグレーション/,
+      /業務システム/,
+      /基幹システム/,
+      /要件定義/,
+      /基本設計/,
+      /詳細設計/,
+      /開発/,
+      /テスト/,
+      /運用保守/,
+      /クラウド移行/,
+      /AWS/i,
+      /Java/i,
+      /Spring/i,
+      /SQL/i,
+      /API/i,
+      /PMO/i,
+      /プロジェクト管理/,
+      /チームリード/,
+      /進捗管理/,
+      /課題管理/
+    ]);
+
+    const candidateHasCloudPmIt = __hasAny(candidateText, [
+      /AWS/i,
+      /Azure/i,
+      /GCP/i,
+      /クラウド/,
+      /移行/,
+      /PMO/i,
+      /PM\b/i,
+      /プロジェクトマネジメント/,
+      /チームリード/,
+      /要件定義/,
+      /基幹システム/,
+      /業務フロー/,
+      /販売管理/,
+      /在庫管理/,
+      /受発注/,
+      /物流/,
+      /小売/
+    ]);
+
+    const candidateHasSap = __hasAny(candidateText, [/SAP/i, /S\/4HANA/i, /ABAP/i]);
+    const candidateHasSalesforce = __hasAny(candidateText, [/Salesforce/i, /SFDC/i]);
+    const candidateHasServiceNow = __hasAny(candidateText, [/ServiceNow/i]);
+    const candidateHasOracleErp = __hasAny(candidateText, [/Oracle\s*ERP/i, /Oracle\s*Cloud/i, /Oracle\s*EBS/i, /E-Business Suite/i]);
+    const candidateHasErp = __hasAny(candidateText, [/ERP/i, /基幹システム/, /SAP/i, /Oracle\s*ERP/i]);
+
+    // Job category signals
+    const isSalesAllianceJob = __hasAny(jobText, [
+      /営業/,
+      /セールス/,
+      /アライアンス/,
+      /アカウント/,
+      /Sales/i,
+      /Alliance/i,
+      /Account/i,
+      /販売実績/,
+      /提案営業/,
+      /パートナー営業/,
+      /セリング/,
+      /クロージング/,
+      /売上/,
+      /Go.?to.?Market/i,
+      /GTM/i
+    ]);
+
+    const isItConsultingJob = __hasAny(jobText, [
+      /ITコンサル/,
+      /テクノロジーコンサル/,
+      /システム導入/,
+      /業務システム/,
+      /基幹システム/,
+      /クラウド/,
+      /AWS/i,
+      /Azure/i,
+      /GCP/i,
+      /PMO/i,
+      /プロジェクトマネジメント/,
+      /要件定義/,
+      /業務改革/,
+      /DX/i,
+      /小売/,
+      /物流/,
+      /SCM/i,
+      /販売管理/,
+      /在庫管理/,
+      /受発注/
+    ]);
+
+    const isSapJob = __hasAny(jobText, [/SAP/i, /S\/4HANA/i, /ABAP/i]);
+    const isSalesforceJob = __hasAny(jobText, [/Salesforce/i, /SFDC/i]);
+    const isServiceNowJob = __hasAny(jobText, [/ServiceNow/i]);
+    const isOracleErpJob = __hasAny(jobText, [/Oracle\s*ERP/i, /Oracle\s*Cloud/i, /Oracle\s*EBS/i, /E-Business Suite/i]);
+    const isErpJob = __hasAny(jobText, [/ERP/i, /基幹システム導入/, /SAP/i, /Oracle\s*ERP/i]);
+
+    // 1. Strong penalty: sales/alliance jobs without sales experience.
+    if (isSalesAllianceJob && !candidateHasSalesExperience) {
+      penalty += 30;
+      notes.push("営業/アライアンス系求人ですが、候補者に法人営業・ソリューション営業・アライアンス営業等の明確な経験が確認できないため減点しました。");
+    }
+
+    // 2. Additional penalty when candidate is delivery/IT and job is sales.
+    if (isSalesAllianceJob && candidateHasDeliveryExperience && !candidateHasSalesExperience) {
+      penalty += 15;
+      notes.push("技術利用経験・顧客折衝経験を、ソリューション販売実績としては扱わない判定にしています。");
+    }
+
+    // 3. Strict product experience penalties.
+    if (isSapJob && !candidateHasSap) {
+      penalty += 25;
+      notes.push("SAP求人ですが、候補者にSAP/S/4HANA/ABAP等の具体経験が確認できないため減点しました。");
+    }
+
+    if (isSalesforceJob && !candidateHasSalesforce) {
+      penalty += 20;
+      notes.push("Salesforce/SFDC求人ですが、候補者に具体経験が確認できないため減点しました。");
+    }
+
+    if (isServiceNowJob && !candidateHasServiceNow) {
+      penalty += 20;
+      notes.push("ServiceNow求人ですが、候補者に具体経験が確認できないため減点しました。");
+    }
+
+    if (isOracleErpJob && !candidateHasOracleErp) {
+      penalty += 18;
+      notes.push("Oracle ERP/Oracle Cloud求人ですが、候補者のOracle経験がDB利用に留まる可能性があるため、ERP/Cloud導入経験としては加点しすぎない判定にしています。");
+    }
+
+    if (isErpJob && !candidateHasErp) {
+      penalty += 15;
+      notes.push("ERP/基幹システム導入求人ですが、ERP導入経験が明確ではないため減点しました。");
+    }
+
+    // 4. Boost natural IT PM / cloud / business system matches.
+    if (!isSalesAllianceJob && isItConsultingJob && candidateHasCloudPmIt) {
+      bonus += 10;
+      notes.push("候補者のSIer・要件定義・クラウド移行・業務システム経験と求人カテゴリの親和性を加点しました。");
+    }
+
+    // 5. If job is sales and current match reason only comes from tech keywords, cap score.
+    if (isSalesAllianceJob && !candidateHasSalesExperience) {
+      const capped = Math.min(score - penalty + bonus, 29);
+      score = capped;
+    } else {
+      score = score - penalty + bonus;
+    }
+
+    __setScore(match, score);
+    __updateRankAndPass(match);
+
+    if (notes.length > 0) {
+      match.roleFitAdjustment = {
+        applied: true,
+        penalty,
+        bonus,
+        notes
+      };
+
+      __appendComment(match, `精度補正：${notes.join(" ")}`);
+    }
+
+    return match;
+  }
+
+  buildMatches = function buildMatchesWithRoleFit(candidate, jobs) {
+    const matches = __prevBuildMatches_roleFit(candidate, jobs);
+
+    if (!Array.isArray(matches)) return matches;
+
+    const adjusted = matches.map(match => __roleFitAdjustMatch(match, candidate));
+
+    adjusted.sort((a, b) => __getScore(b) - __getScore(a));
+
+    return adjusted.map((match, index) => {
+      match.rankNo = index + 1;
+      match.order = index + 1;
+      return match;
+    });
+  };
+
+  console.log("===== Role-fit scoring patch applied =====");
+}
+// ===== END FINAL OVERRIDE =====
+
