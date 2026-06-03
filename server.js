@@ -3151,19 +3151,63 @@ app.post("/manual-match", async (req, res) => {
 });
 
 app.post("/refresh-jobs", async (req, res) => {
-  try {
-    const jobs = await getJobs({ forceRefresh: true });
+  let cachedJobs = [];
 
-    res.json({
-      message: "求人キャッシュを更新しました",
-      jobsCount: jobs.length
+  try {
+    if (fs.existsSync(CACHE_PATH)) {
+      const cache = JSON.parse(fs.readFileSync(CACHE_PATH, "utf8"));
+      cachedJobs = Array.isArray(cache.jobs) ? cache.jobs : [];
+    }
+  } catch (cacheReadError) {
+    console.error("refresh-jobs: failed to read existing cache before refresh:", cacheReadError.message);
+  }
+
+  try {
+    const freshJobs = await getJobs({ forceRefresh: true });
+    const jobs = Array.isArray(freshJobs) ? freshJobs : [];
+
+    if (jobs.length > 0) {
+      return res.json({
+        message: "求人キャッシュを更新しました",
+        jobsCount: jobs.length,
+        fallbackToCache: false
+      });
+    }
+
+    console.error("refresh-jobs: fresh fetch returned 0 jobs. fallback to existing cache.");
+
+    if (cachedJobs.length > 0) {
+      return res.json({
+        message: "最新求人取得が0件だったため、既存キャッシュで継続します",
+        jobsCount: cachedJobs.length,
+        fallbackToCache: true,
+        refreshError: "fresh fetch returned 0 jobs"
+      });
+    }
+
+    return res.status(500).json({
+      message: "求人キャッシュ更新失敗",
+      error: "fresh fetch returned 0 jobs and existing cache is empty",
+      jobsCount: 0,
+      fallbackToCache: false
     });
   } catch (error) {
-    console.error(error);
+    console.error("refresh-jobs: fresh fetch failed. fallback to existing cache:", error);
 
-    res.status(500).json({
+    if (cachedJobs.length > 0) {
+      return res.json({
+        message: "最新求人取得に失敗したため、既存キャッシュで継続します",
+        jobsCount: cachedJobs.length,
+        fallbackToCache: true,
+        refreshError: error.message
+      });
+    }
+
+    return res.status(500).json({
       message: "求人キャッシュ更新失敗",
-      error: error.message
+      error: error.message,
+      jobsCount: 0,
+      fallbackToCache: false
     });
   }
 });
