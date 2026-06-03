@@ -24,6 +24,50 @@ const client = new OpenAI({
 
 const app = express();
 
+// ===== Basic Auth for PoC access control =====
+// Set BASIC_AUTH_USER and BASIC_AUTH_PASS in Render Environment Variables.
+// Local development is not blocked unless these env vars are set.
+function basicAuthMiddleware(req, res, next) {
+  const user = process.env.BASIC_AUTH_USER;
+  const pass = process.env.BASIC_AUTH_PASS;
+
+  // If not configured, skip auth. Useful for local development.
+  if (!user || !pass) {
+    return next();
+  }
+
+  const authHeader = req.headers.authorization || "";
+  const [scheme, encoded] = authHeader.split(" ");
+
+  if (scheme !== "Basic" || !encoded) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="Consulting Job Matcher PoC"');
+    return res.status(401).send("Authentication required");
+  }
+
+  let decoded = "";
+  try {
+    decoded = Buffer.from(encoded, "base64").toString("utf8");
+  } catch (e) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="Consulting Job Matcher PoC"');
+    return res.status(401).send("Invalid authentication");
+  }
+
+  const idx = decoded.indexOf(":");
+  const inputUser = idx >= 0 ? decoded.slice(0, idx) : "";
+  const inputPass = idx >= 0 ? decoded.slice(idx + 1) : "";
+
+  if (inputUser === user && inputPass === pass) {
+    return next();
+  }
+
+  res.setHeader("WWW-Authenticate", 'Basic realm="Consulting Job Matcher PoC"');
+  return res.status(401).send("Invalid username or password");
+}
+
+app.use(basicAuthMiddleware);
+// ===== End Basic Auth =====
+
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
