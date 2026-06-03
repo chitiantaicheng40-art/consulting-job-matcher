@@ -8946,3 +8946,67 @@ ${relevant}
 };
 // ===== END REAL OVERRIDE =====
 
+
+
+// ===== Utility: safe text for match comments =====
+// Prevents "[object Object]" from appearing in UI comments/reasons.
+function toSafeDisplayText(value) {
+  if (value == null) return "";
+
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map(v => toSafeDisplayText(v))
+      .filter(Boolean)
+      .join("、");
+  }
+
+  if (typeof value === "object") {
+    const candidates = [
+      value.text,
+      value.label,
+      value.name,
+      value.title,
+      value.requirement,
+      value.condition,
+      value.skill,
+      value.keyword,
+      value.reason,
+      value.description,
+      value.value
+    ];
+
+    for (const c of candidates) {
+      const t = toSafeDisplayText(c);
+      if (t) return t;
+    }
+
+    try {
+      const vals = Object.values(value)
+        .map(v => toSafeDisplayText(v))
+        .filter(Boolean);
+
+      if (vals.length) return vals.join("、");
+    } catch (_) {}
+
+    return "";
+  }
+
+  return String(value).trim();
+}
+
+function toSafeDisplayList(value) {
+  if (value == null) return [];
+
+  const arr = Array.isArray(value) ? value : [value];
+
+  return arr
+    .map(v => toSafeDisplayText(v))
+    .filter(Boolean)
+    .filter(v => v !== "[object Object]")
+    .filter((v, i, self) => self.indexOf(v) === i);
+}
+// ===== End Utility =====
