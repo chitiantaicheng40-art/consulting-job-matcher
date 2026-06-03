@@ -143,66 +143,27 @@ function pick(job, keys) {
 }
 
 function mustText(job) {
-  const prioritySources = [
-    job.mustRequirements,
-    job.requiredRequirements,
-    job.required_skills,
-    job.requiredSkills,
-    job.mustSkills,
-    job.must,
-    job.required
-  ];
-
-  let picked = null;
-
-  for (const src of prioritySources) {
-    if (!src) continue;
-
-    if (Array.isArray(src) && src.length > 0) {
-      picked = src;
-      break;
-    }
-
-    if (!Array.isArray(src) && String(src || "").trim()) {
-      picked = src;
-      break;
-    }
-  }
-
-  if (!picked) return "なし";
-
-  let items = [];
-
-  if (Array.isArray(picked)) {
-    items = picked;
-  } else {
-    items = String(picked)
-      .split(/[、\n]/)
-      .map(v => v.trim())
-      .filter(Boolean);
-  }
-
-  const seen = new Set();
-  const unique = [];
-
-  for (const item of items) {
-    const text = String(item || "")
-      .replace(/^・\s*/, "")
-      .replace(/^[\-ー－―]\s*/, "")
-      .trim();
-
-    const key = text
-      .replace(/[。、\s]/g, "")
-      .trim();
-
-    if (!key) continue;
-    if (seen.has(key)) continue;
-
-    seen.add(key);
-    unique.push(text);
-  }
-
-  return unique.length ? unique.join("、") : "なし";
+  return pick(job, [
+    "mustRequirements",
+    "requiredRequirements",
+    "requirements",
+    "requiredSkills",
+    "required_skills",
+    "mustSkills",
+    "necessaryRequirements",
+    "requiredExperience",
+    "requiredQualifications",
+    "requiredConditions",
+    "must",
+    "required",
+    "応募資格",
+    "応募条件",
+    "必須要件",
+    "必須条件",
+    "必要経験",
+    "求める経験",
+    "登録資格"
+  ]);
 }
 
 function welcomeText(job) {
