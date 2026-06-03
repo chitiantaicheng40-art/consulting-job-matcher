@@ -8130,9 +8130,23 @@ extractAccentureManualJobWithAI = async function safeExtractAccentureManualJobWi
     jobUrl: safeUrl,
     requiredRequirements,
     preferredRequirements,
+
+    // Compatibility aliases for existing UI/log/scoring code
+    // Some old parts of this app read required / requiredSkills / required_skills instead of requiredRequirements.
+    required: requiredRequirements,
+    requiredSkills: requiredRequirements,
+    required_skills: requiredRequirements,
     mustRequirements: requiredRequirements,
-    niceRequirements: preferredRequirements,
+    must: requiredRequirements,
+    mandatoryRequirements: requiredRequirements,
     requirements: requiredRequirements,
+
+    preferred: preferredRequirements,
+    preferredSkills: preferredRequirements,
+    preferred_skills: preferredRequirements,
+    niceRequirements: preferredRequirements,
+    nice: preferredRequirements,
+
     locations,
     location: locations.join(" / "),
     source: "manual-url",
@@ -8379,9 +8393,23 @@ extractAccentureManualJobWithAI = async function safeExtractAccentureManualJobWi
     jobUrl: safeUrl,
     requiredRequirements,
     preferredRequirements,
+
+    // Compatibility aliases for existing UI/log/scoring code
+    // Some old parts of this app read required / requiredSkills / required_skills instead of requiredRequirements.
+    required: requiredRequirements,
+    requiredSkills: requiredRequirements,
+    required_skills: requiredRequirements,
     mustRequirements: requiredRequirements,
-    niceRequirements: preferredRequirements,
+    must: requiredRequirements,
+    mandatoryRequirements: requiredRequirements,
     requirements: requiredRequirements,
+
+    preferred: preferredRequirements,
+    preferredSkills: preferredRequirements,
+    preferred_skills: preferredRequirements,
+    niceRequirements: preferredRequirements,
+    nice: preferredRequirements,
+
     locations,
     location: locations.join(" / "),
     source: "manual-url",
@@ -8783,9 +8811,23 @@ ${relevant}
     jobUrl: safeUrl,
     requiredRequirements,
     preferredRequirements,
+
+    // Compatibility aliases for existing UI/log/scoring code
+    // Some old parts of this app read required / requiredSkills / required_skills instead of requiredRequirements.
+    required: requiredRequirements,
+    requiredSkills: requiredRequirements,
+    required_skills: requiredRequirements,
     mustRequirements: requiredRequirements,
-    niceRequirements: preferredRequirements,
+    must: requiredRequirements,
+    mandatoryRequirements: requiredRequirements,
     requirements: requiredRequirements,
+
+    preferred: preferredRequirements,
+    preferredSkills: preferredRequirements,
+    preferred_skills: preferredRequirements,
+    niceRequirements: preferredRequirements,
+    nice: preferredRequirements,
+
     locations,
     location: locations.join(" / "),
     source: "manual-url",
