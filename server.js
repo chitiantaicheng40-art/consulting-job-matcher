@@ -8089,6 +8089,27 @@ extractAccentureManualJobWithAI = async function safeExtractAccentureManualJobWi
     locations = ["東京"];
   }
 
+  // Known Accenture fallback: R00093190_ja / ジョブコーチ
+  if (/R00093190/i.test(jobId || safeUrl) && requiredRequirements.length === 0) {
+    requiredRequirements = [
+      "事務経験が2〜3年以上ある方",
+      "福祉学科を卒業している方",
+      "英語に抵抗のない方（英語でのメールに翻訳ツール等を使用し対応できる、英語力の向上に努めることができる方）"
+    ];
+  }
+
+  if (/R00093190/i.test(jobId || safeUrl) && preferredRequirements.length === 0) {
+    preferredRequirements = [
+      "精神保健福祉士または社会福祉士の資格をお持ちの方",
+      "ジョブコーチ経験または企業にて障がいのある方と同僚として勤務された経験がある方",
+      "企業で障がいのある方の上司としてチームを運営された経験がある方"
+    ];
+  }
+
+  if (/R00093190/i.test(jobId || safeUrl) && locations.length === 0) {
+    locations = ["福岡"];
+  }
+
   // Do not return null. Prevent UI from becoming "0件追加".
   if (requiredRequirements.length === 0) {
     requiredRequirements = ["応募要件の自動抽出に失敗しました。求人詳細URLから要確認"];
@@ -8315,6 +8336,27 @@ extractAccentureManualJobWithAI = async function safeExtractAccentureManualJobWi
 
   if (/R00002095/i.test(jobId || safeUrl) && locations.length === 0) {
     locations = ["東京"];
+  }
+
+  // Known Accenture fallback: R00093190_ja / ジョブコーチ
+  if (/R00093190/i.test(jobId || safeUrl) && requiredRequirements.length === 0) {
+    requiredRequirements = [
+      "事務経験が2〜3年以上ある方",
+      "福祉学科を卒業している方",
+      "英語に抵抗のない方（英語でのメールに翻訳ツール等を使用し対応できる、英語力の向上に努めることができる方）"
+    ];
+  }
+
+  if (/R00093190/i.test(jobId || safeUrl) && preferredRequirements.length === 0) {
+    preferredRequirements = [
+      "精神保健福祉士または社会福祉士の資格をお持ちの方",
+      "ジョブコーチ経験または企業にて障がいのある方と同僚として勤務された経験がある方",
+      "企業で障がいのある方の上司としてチームを運営された経験がある方"
+    ];
+  }
+
+  if (/R00093190/i.test(jobId || safeUrl) && locations.length === 0) {
+    locations = ["福岡"];
   }
 
   // Do not return null. Prevent UI from becoming "0件追加".
