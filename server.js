@@ -8742,6 +8742,51 @@ ${relevant}
       : [];
   }
 
+  function cleanAndSplitRequirementItems(items) {
+    const out = [];
+
+    for (const raw of Array.isArray(items) ? items : []) {
+      let item = String(raw || "")
+        .replace(/^必須要件[:：]?\s*/g, "")
+        .replace(/^応募要件[:：]?\s*/g, "")
+        .replace(/^】\s*/g, "")
+        .replace(/^[:：】\s]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (!item) continue;
+
+      // Split compact numbered requirements like:
+      // ①社会人経験...②語学力...③以下いずれか...
+      const numbered = item
+        .replace(/\s*(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)\s*/g, "\n$1")
+        .split("\n")
+        .map(v => v.trim())
+        .filter(Boolean);
+
+      if (numbered.length >= 2) {
+        for (const n of numbered) {
+          out.push(n.replace(/^(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)\s*/, "").trim());
+        }
+        continue;
+      }
+
+      // Split Japanese enumerations if AI returned one long line.
+      const parts = item
+        .replace(/\s+(?=(システム開発|パッケージ導入|インフラ構築|ITコンサルティング|業務改革|DX|AI|クラウド|SAP|Oracle|Salesforce))/g, "\n")
+        .split("\n")
+        .map(v => v.trim())
+        .filter(Boolean);
+
+      for (const p of parts) out.push(p);
+    }
+
+    return [...new Set(out)]
+      .map(v => v.replace(/^[・\-\*]\s*/, "").trim())
+      .filter(v => v.length >= 3)
+      .slice(0, 30);
+  }
+
   const jobId = getJobId(safeUrl);
   const fallbackTitle = cleanTitle(decodeTitleFromUrl(safeUrl));
 
@@ -8786,10 +8831,13 @@ ${relevant}
     const aiPreferred = arr(ai?.preferredRequirements);
     const aiLocations = arr(ai?.locations);
 
-    if (aiRequired.length > 0) requiredRequirements = aiRequired;
-    if (aiPreferred.length > 0) preferredRequirements = aiPreferred;
+    if (aiRequired.length > 0) requiredRequirements = cleanAndSplitRequirementItems(aiRequired);
+    if (aiPreferred.length > 0) preferredRequirements = cleanAndSplitRequirementItems(aiPreferred);
     if (aiLocations.length > 0) locations = aiLocations;
   }
+
+  requiredRequirements = cleanAndSplitRequirementItems(requiredRequirements);
+  preferredRequirements = cleanAndSplitRequirementItems(preferredRequirements);
 
   const finalTitle = cleanTitle(ai?.title || fallbackTitle);
   const displayTitle = `Accenture / ${finalTitle}`;
