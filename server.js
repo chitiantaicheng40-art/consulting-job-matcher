@@ -8403,3 +8403,412 @@ extractAccentureManualJobWithAI = async function safeExtractAccentureManualJobWi
 };
 // ===== END SAFE OVERRIDE =====
 
+
+// ===== REAL OVERRIDE: Accenture generic extractor from live page + AI =====
+// This final override replaces ID-specific fallback behavior.
+// It fetches the Accenture page, decodes HTML/escaped JSON text, extracts sections by headers,
+// and uses OpenAI only as a structured fallback. No job-id hardcoded requirements.
+extractAccentureManualJobWithAI = async function realExtractAccentureManualJobWithAI(url, text = "") {
+  const safeUrl = String(url || "");
+  const inputText = String(text || "");
+
+  function getJobId(u) {
+    try {
+      const parsed = new URL(u);
+      return parsed.searchParams.get("id") || "";
+    } catch (e) {
+      const m = String(u || "").match(/[?&]id=([^&]+)/);
+      return m ? m[1] : "";
+    }
+  }
+
+  function decodeTitleFromUrl(u) {
+    try {
+      const parsed = new URL(u);
+      const rawTitle = parsed.searchParams.get("title") || "";
+      return rawTitle
+        ? decodeURIComponent(rawTitle).replace(/\+/g, " ").replace(/\s+/g, " ").trim()
+        : "";
+    } catch (e) {
+      const m = String(u || "").match(/[?&]title=([^&]+)/);
+      if (!m) return "";
+      try {
+        return decodeURIComponent(m[1]).replace(/\+/g, " ").replace(/\s+/g, " ").trim();
+      } catch (_) {
+        return m[1].replace(/\+/g, " ").trim();
+      }
+    }
+  }
+
+  function cleanTitle(title) {
+    return String(title || "Accenture 手動追加求人")
+      .replace(/^(Accenture\s*\/\s*)+/i, "")
+      .replace(/^Accenture\s*/i, "")
+      .replace(/\s+/g, " ")
+      .trim() || "Accenture 手動追加求人";
+  }
+
+  function decodeEscaped(s) {
+    let out = String(s || "");
+
+    // Common JS/JSON escapes seen in Accenture rendered payloads
+    out = out
+      .replace(/\\x([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\\u([0-9A-Fa-f]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\n")
+      .replace(/\\t/g, " ")
+      .replace(/\\"/g, '"')
+      .replace(/\\\//g, "/");
+
+    // HTML entities
+    out = out
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+
+    return out;
+  }
+
+  function htmlToLooseText(html) {
+    return decodeEscaped(html)
+      .replace(/<script[\s\S]*?<\/script>/gi, m => "\n" + m + "\n")
+      .replace(/<style[\s\S]*?<\/style>/gi, "\n")
+      .replace(/<\/(p|div|li|ul|ol|section|article|h1|h2|h3|h4|br)>/gi, "\n")
+      .replace(/<(br)\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/[　]/g, " ")
+      .replace(/\r/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+  }
+
+  async function fetchPageText(u) {
+    let html = "";
+    try {
+      const res = await fetch(u, {
+        headers: {
+          "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+          "accept-language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
+          "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+      });
+      html = await res.text();
+    } catch (e) {
+      console.error("Accenture fetch failed:", e.message);
+    }
+
+    let loose = htmlToLooseText(html);
+
+    // If normal fetch text is too thin, try Playwright when available.
+    if (!/応募要件|必須要件|必須条件|Qualifications|Basic Qualifications|募集要項|職務内容/.test(loose)) {
+      try {
+        const { chromium } = require("playwright");
+        const browser = await chromium.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"]
+        });
+        const page = await browser.newPage({
+          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        });
+        await page.goto(u, { waitUntil: "networkidle", timeout: 45000 });
+        const bodyText = await page.locator("body").innerText({ timeout: 15000 }).catch(() => "");
+        await browser.close();
+        if (bodyText && bodyText.length > loose.length) {
+          loose = bodyText;
+        }
+      } catch (e) {
+        console.error("Accenture Playwright fallback skipped/failed:", e.message);
+      }
+    }
+
+    return {
+      html,
+      text: [inputText, loose, decodeEscaped(html)].filter(Boolean).join("\n\n")
+    };
+  }
+
+  function normalizeForSection(s) {
+    return decodeEscaped(s)
+      .replace(/[　]/g, " ")
+      .replace(/(◆|■|●)/g, "\n$1")
+      .replace(/(応募要件|必須要件|必須条件|歓迎要件|歓迎条件|望ましい経験・スキル|勤務地|待遇|雇用形態|応募方法|選考プロセス|Qualifications|Basic Qualifications|Preferred Qualifications)/g, "\n$1\n")
+      .replace(/([。])\s*(?=(・|-|[0-9０-９]+[.)．、]|【|応募|必須|歓迎|勤務地|待遇|雇用形態))/g, "$1\n")
+      .replace(/[;；]\s*/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\n{3,}/g, "\n\n");
+  }
+
+  function extractSection(body, startHeaders, endHeaders) {
+    const normalized = normalizeForSection(body);
+    const lines = normalized
+      .split("\n")
+      .map(v => v.trim())
+      .filter(Boolean);
+
+    let inSection = false;
+    const picked = [];
+
+    for (const line of lines) {
+      const compact = line.replace(/\s/g, "");
+
+      if (!inSection && startHeaders.some(h => compact.includes(h.replace(/\s/g, "")))) {
+        inSection = true;
+        continue;
+      }
+
+      if (inSection && endHeaders.some(h => compact.includes(h.replace(/\s/g, "")))) {
+        break;
+      }
+
+      if (inSection) picked.push(line);
+    }
+
+    return picked.join("\n");
+  }
+
+  function splitRequirements(sectionText) {
+    const text = normalizeForSection(sectionText)
+      .replace(/^[・\-\*]\s*/gm, "")
+      .replace(/^[0-9０-９]+[.)．、]\s*/gm, "");
+
+    const parts = text
+      .split(/\n|(?=・)|(?=-\s)|(?=※)|(?=【)/)
+      .map(v => v.replace(/^[・\-\*※]\s*/, "").trim())
+      .map(v => v.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+
+    const ng = /^(◆|■|●)?(応募要件|必須要件|必須条件|Qualifications|Basic Qualifications|歓迎|歓迎要件|歓迎条件|望ましい|Preferred|勤務地|待遇|雇用形態|応募方法|選考プロセス)$/i;
+
+    return [...new Set(parts)]
+      .filter(v => !ng.test(v))
+      .filter(v => !/^(Apply|応募する|保存|シェア|職種|勤務地|求人番号|Job No\.?|Job number)$/i.test(v))
+      .filter(v => v.length >= 8)
+      .slice(0, 30);
+  }
+
+  function extractLocations(body) {
+    const s = String(body || "");
+    const locations = [];
+    if (/東京|Tokyo/i.test(s)) locations.push("東京");
+    if (/大阪|Osaka/i.test(s)) locations.push("大阪");
+    if (/名古屋|Nagoya/i.test(s)) locations.push("名古屋");
+    if (/福岡|Fukuoka/i.test(s)) locations.push("福岡");
+    if (/札幌|Sapporo/i.test(s)) locations.push("札幌");
+    if (/仙台|Sendai/i.test(s)) locations.push("仙台");
+    if (/横浜|Yokohama/i.test(s)) locations.push("横浜");
+    return [...new Set(locations)];
+  }
+
+  function pickRelevantChunks(body) {
+    const s = String(body || "");
+    const keys = [
+      "応募要件",
+      "必須要件",
+      "必須条件",
+      "Qualifications",
+      "Basic Qualifications",
+      "Preferred Qualifications",
+      "望ましい経験",
+      "歓迎要件",
+      "勤務地",
+      "職務内容",
+      "仕事内容",
+      "募集要項"
+    ];
+
+    const chunks = [];
+    for (const key of keys) {
+      let idx = s.indexOf(key);
+      while (idx >= 0 && chunks.length < 10) {
+        chunks.push(s.slice(Math.max(0, idx - 3500), Math.min(s.length, idx + 8000)));
+        idx = s.indexOf(key, idx + key.length);
+      }
+    }
+
+    if (chunks.length === 0) {
+      chunks.push(s.slice(0, 30000));
+    }
+
+    return [...new Set(chunks)].join("\n\n--- CHUNK ---\n\n").slice(0, 50000);
+  }
+
+  async function extractWithOpenAI({ pageText, fallbackTitle, jobId }) {
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("OPENAI_API_KEY is missing. Skip AI extraction.");
+      return null;
+    }
+
+    const relevant = pickRelevantChunks(pageText);
+
+    const prompt = `
+あなたは求人票の抽出エンジンです。
+以下のAccenture求人ページ本文から、求人情報をJSONで抽出してください。
+
+絶対ルール：
+- 本文に書かれている事実だけを抽出する。
+- requiredRequirements は「応募要件」「必須要件」「必須条件」「Qualifications」「Basic Qualifications」配下のみ。
+- preferredRequirements は「歓迎要件」「歓迎条件」「望ましい経験・スキル」「Preferred Qualifications」配下のみ。
+- requiredRequirements に歓迎条件を混ぜない。
+- 見出し自体は配列に入れない。
+- 「以下いずれか」「下記いずれか」の配下は、個別要件として配列にする。
+- 本文から判断できない場合は推測せず [] にする。
+- title は求人タイトル。URL title が妥当ならそれを使ってよい。
+- locations は勤務地。東京/大阪/名古屋/福岡などを配列にする。
+- 出力はJSONのみ。
+
+URL jobId: ${jobId}
+URL title fallback: ${fallbackTitle}
+
+返却JSON形式：
+{
+  "title": "",
+  "requiredRequirements": [],
+  "preferredRequirements": [],
+  "locations": []
+}
+
+求人ページ本文：
+${relevant}
+`.trim();
+
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: "You extract Japanese job postings into strict JSON. Do not invent facts." },
+            { role: "user", content: prompt }
+          ],
+          temperature: 0
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("OpenAI extraction failed:", JSON.stringify(json).slice(0, 1000));
+        return null;
+      }
+
+      const content = json?.choices?.[0]?.message?.content || "";
+      return JSON.parse(content);
+    } catch (e) {
+      console.error("OpenAI extraction error:", e.message);
+      return null;
+    }
+  }
+
+  function arr(v) {
+    return Array.isArray(v)
+      ? [...new Set(v.map(x => String(x || "").trim()).filter(Boolean))]
+      : [];
+  }
+
+  const jobId = getJobId(safeUrl);
+  const fallbackTitle = cleanTitle(decodeTitleFromUrl(safeUrl));
+
+  const fetched = await fetchPageText(safeUrl);
+  const pageText = fetched.text || inputText;
+
+  const requiredSection = extractSection(
+    pageText,
+    ["◆応募要件", "応募要件", "必須要件", "必須条件", "Basic Qualifications", "Qualifications"],
+    [
+      "◆望ましい経験・スキル",
+      "望ましい経験・スキル",
+      "歓迎要件",
+      "歓迎条件",
+      "Preferred Qualifications",
+      "◆勤務地",
+      "勤務地",
+      "◆待遇",
+      "待遇",
+      "雇用形態",
+      "応募方法",
+      "選考プロセス",
+      "Selection Process"
+    ]
+  );
+
+  const preferredSection = extractSection(
+    pageText,
+    ["◆望ましい経験・スキル", "望ましい経験・スキル", "歓迎要件", "歓迎条件", "Preferred Qualifications"],
+    ["◆勤務地", "勤務地", "◆待遇", "待遇", "雇用形態", "応募方法", "選考プロセス", "Selection Process"]
+  );
+
+  let requiredRequirements = splitRequirements(requiredSection);
+  let preferredRequirements = splitRequirements(preferredSection);
+  let locations = extractLocations(pageText);
+  let ai = null;
+
+  // If rule extraction is weak, use AI on the fetched page text.
+  if (requiredRequirements.length === 0 || requiredRequirements.join("").length < 30) {
+    ai = await extractWithOpenAI({ pageText, fallbackTitle, jobId });
+    const aiRequired = arr(ai?.requiredRequirements);
+    const aiPreferred = arr(ai?.preferredRequirements);
+    const aiLocations = arr(ai?.locations);
+
+    if (aiRequired.length > 0) requiredRequirements = aiRequired;
+    if (aiPreferred.length > 0) preferredRequirements = aiPreferred;
+    if (aiLocations.length > 0) locations = aiLocations;
+  }
+
+  const finalTitle = cleanTitle(ai?.title || fallbackTitle);
+  const displayTitle = `Accenture / ${finalTitle}`;
+
+  const extractionStatus =
+    requiredRequirements.length > 0
+      ? "success"
+      : "failed";
+
+  const job = {
+    id: jobId || `accenture_manual_${Date.now()}`,
+    jobId: jobId || "",
+    company: "Accenture",
+    companyName: "Accenture",
+    title: finalTitle,
+    displayTitle,
+    name: displayTitle,
+    url: safeUrl,
+    jobUrl: safeUrl,
+    requiredRequirements,
+    preferredRequirements,
+    mustRequirements: requiredRequirements,
+    niceRequirements: preferredRequirements,
+    requirements: requiredRequirements,
+    locations,
+    location: locations.join(" / "),
+    source: "manual-url",
+    sourceType: "accenture-real-page-ai-extractor",
+    extractionStatus,
+    extractionNote: extractionStatus === "failed"
+      ? "Accentureページ本文から応募要件を抽出できませんでした。本文取得またはページ構造の確認が必要です。"
+      : "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  console.log("===== REAL Accenture extractor applied =====");
+  console.log({
+    jobId: job.jobId,
+    title: job.title,
+    requiredCount: job.requiredRequirements.length,
+    preferredCount: job.preferredRequirements.length,
+    locations: job.locations,
+    extractionStatus: job.extractionStatus
+  });
+
+  return job;
+};
+// ===== END REAL OVERRIDE =====
+
