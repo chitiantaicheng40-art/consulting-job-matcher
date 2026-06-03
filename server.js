@@ -3086,12 +3086,75 @@ for (const job of addedJobs) {
 });
 
 
+
+// ===== Utility: get jobs with cache fallback for matching =====
+// Prevents match results from becoming 0件 when force refresh fails or returns empty.
+async function getJobsForMatchingWithFallback(forceRefresh = false) {
+  let cachedJobs = [];
+
+  try {
+    if (fs.existsSync(CACHE_PATH)) {
+      const cache = JSON.parse(fs.readFileSync(CACHE_PATH, "utf8"));
+      cachedJobs = Array.isArray(cache.jobs) ? cache.jobs : [];
+    }
+  } catch (cacheReadError) {
+    console.error("getJobsForMatchingWithFallback: failed to read cache:", cacheReadError.message);
+  }
+
+  try {
+    const freshOrCachedJobs = await getJobs({ forceRefresh });
+    const jobs = Array.isArray(freshOrCachedJobs) ? freshOrCachedJobs : [];
+
+    if (jobs.length > 0) {
+      return {
+        jobs,
+        fallbackToCache: false,
+        refreshError: "",
+        cacheUsed: !forceRefresh && isCacheValid()
+      };
+    }
+
+    console.error("getJobsForMatchingWithFallback: getJobs returned 0 jobs. fallback to existing cache.");
+
+    if (cachedJobs.length > 0) {
+      return {
+        jobs: cachedJobs,
+        fallbackToCache: true,
+        refreshError: "getJobs returned 0 jobs",
+        cacheUsed: true
+      };
+    }
+
+    return {
+      jobs: [],
+      fallbackToCache: false,
+      refreshError: "getJobs returned 0 jobs and existing cache is empty",
+      cacheUsed: false
+    };
+  } catch (error) {
+    console.error("getJobsForMatchingWithFallback: getJobs failed. fallback to existing cache:", error.message);
+
+    if (cachedJobs.length > 0) {
+      return {
+        jobs: cachedJobs,
+        fallbackToCache: true,
+        refreshError: error.message,
+        cacheUsed: true
+      };
+    }
+
+    throw error;
+  }
+}
+// ===== End Utility =====
+
 app.post("/upload-resume", upload.single("resume"), async (req, res) => {
   try {
     const forceRefresh = req.query.refresh === "1";
 
     const candidate = await analyzeResumeWithVision(req.file.buffer);
-    const jobs = await getJobs({ forceRefresh });
+    const jobsResult = await getJobsForMatchingWithFallback(forceRefresh);
+    const jobs = jobsResult.jobs;
     const matches = buildMatches(candidate, jobs);
 
     const usableJobsCount = jobs.filter(isUsableJobForMatching).length;
@@ -3100,7 +3163,9 @@ app.post("/upload-resume", upload.single("resume"), async (req, res) => {
       candidate,
       jobsCount: jobs.length,
       usableJobsCount,
-      cacheUsed: !forceRefresh && isCacheValid(),
+      cacheUsed: jobsResult.cacheUsed,
+      fallbackToCache: jobsResult.fallbackToCache,
+      refreshError: jobsResult.refreshError,
       matches
     });
   } catch (error) {
@@ -3128,7 +3193,8 @@ app.post("/manual-match", async (req, res) => {
       evidence: []
     });
 
-    const jobs = await getJobs({ forceRefresh });
+    const jobsResult = await getJobsForMatchingWithFallback(forceRefresh);
+    const jobs = jobsResult.jobs;
     const matches = buildMatches(candidate, jobs);
 
     const usableJobsCount = jobs.filter(isUsableJobForMatching).length;
@@ -3137,7 +3203,9 @@ app.post("/manual-match", async (req, res) => {
       candidate,
       jobsCount: jobs.length,
       usableJobsCount,
-      cacheUsed: !forceRefresh && isCacheValid(),
+      cacheUsed: jobsResult.cacheUsed,
+      fallbackToCache: jobsResult.fallbackToCache,
+      refreshError: jobsResult.refreshError,
       matches
     });
   } catch (error) {
