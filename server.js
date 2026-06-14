@@ -14457,3 +14457,201 @@ if (!global.__DIRECT_SALESFORCE_CRM_RECOMMENDATIONS_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: calibrate direct Salesforce/CRM recommendation scores =====
+// Purpose:
+// - Direct CRM recommendations now surface the right family of jobs.
+// - Calibrate scores so adjacent jobs like MuleSoft/API and industry-front jobs do not look too strong.
+if (!global.__DIRECT_CRM_SCORE_CALIBRATION_APPLIED__) {
+  global.__DIRECT_CRM_SCORE_CALIBRATION_APPLIED__ = true;
+
+  function __dccText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__dccText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__dccText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __dccScore(match) {
+    const n = Number(match?.score ?? match?.totalScore ?? match?.matchScore ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __dccSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __dccSetRank(match) {
+    const score = __dccScore(match);
+
+    if (score >= 75) {
+      match.rank = "A";
+      match.documentPassLikelihood = "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.recommendationLevel = "優先提案";
+      match.isRecommended = true;
+    } else if (score >= 55) {
+      match.rank = "B";
+      match.documentPassLikelihood = "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.recommendationLevel = "提案候補";
+      match.isRecommended = true;
+    } else if (score >= 35) {
+      match.rank = "C";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "要確認";
+      match.isRecommended = true;
+    } else {
+      match.rank = "D";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+    }
+
+    return match;
+  }
+
+  function __dccMatchText(match) {
+    return [
+      __dccText(match.company),
+      __dccText(match.position),
+      __dccText(match.title),
+      __dccText(match.url),
+      __dccText(match.requiredMatched),
+      __dccText(match.requiredMissing),
+      __dccText(match.aiJobProfile),
+      __dccText(match.comment)
+    ].join("\n");
+  }
+
+  function __dccCalibrate(match) {
+    if (!match?.directAiRecommendation?.applied) return match;
+
+    const before = __dccScore(match);
+    const text = __dccMatchText(match);
+
+    let score = before;
+    const notes = [];
+
+    const isSalesforceCore =
+      /Salesforce コンサルタント|Salesforceコンサルタント|AI×Salesforce|Salesforceエンジニア|Salesforce等のCRMソリューション/i.test(text);
+
+    const isCrmCxCore =
+      /CRMやMAツール|CRM導入|デジタルCX|CX\/CRM|カスタマーサービス|顧客体験|Experience Business|Experience management/i.test(text);
+
+    const isMulesoftOrApi =
+      /MuleSoft|API開発|API開発・管理|システム間連携|連携基盤|JavaによるAPI/i.test(text);
+
+    const isIndustryFront =
+      /インダストリーコンサルタント|金融サービス領域|製造・流通領域|素材・エネルギー領域|公共サービス・医療健康領域|通信・メディア・ハイテク領域/i.test(text);
+
+    const hasIndustryRequirement =
+      /銀行|証券|生保|損保|クレジットカード|消費財|流通|小売|自動車|産業機械|電力|ガス|化学|素材|鉄鋼|行政機関|公共サービス|医療|通信|メディア|ハイテク/i.test(text);
+
+    const hasManagerOrSalesRequirement =
+      /マネジメント経験|Manager|マネージャー|法人営業|営業経験|営業企画|マーケティング戦略|事業企画|事業開発|サービス企画/i.test(text);
+
+    if (isSalesforceCore && !isMulesoftOrApi) {
+      score = Math.max(score, 74);
+      score = Math.min(score, 82);
+      notes.push("Salesforce特化求人のため高めに維持しました。");
+    }
+
+    if (isCrmCxCore && !isSalesforceCore) {
+      score = Math.min(score, 68);
+      score = Math.max(score, 55);
+      notes.push("CRM/CX導入・業務改革求人として中〜高評価に調整しました。");
+    }
+
+    if (isMulesoftOrApi) {
+      score = Math.min(score, 58);
+      score = Math.max(score, 45);
+      notes.push("MuleSoft/API連携基盤はSalesforce周辺領域のため、直接Salesforce求人より低めに調整しました。");
+    }
+
+    if (isIndustryFront || hasIndustryRequirement) {
+      score = Math.min(score, 55);
+      score = Math.max(score, 42);
+      notes.push("業界知見要件が強いため、提案前確認が必要な水準に調整しました。");
+    }
+
+    if (hasManagerOrSalesRequirement && !isSalesforceCore) {
+      score = Math.min(score, 55);
+      notes.push("マネジメント・営業企画・事業企画系要件が含まれるため上限を55点にしました。");
+    }
+
+    if (score !== before) {
+      __dccSetScore(match, score);
+      __dccSetRank(match);
+
+      match.directCrmScoreCalibration = {
+        applied: true,
+        before,
+        after: __dccScore(match),
+        notes
+      };
+
+      const prefix = `スコア調整：${notes.join(" ")}`;
+      match.comment = `${match.comment || ""} ${prefix}`.trim();
+      match.recommendation_comment = match.comment;
+      match.documentPassReason = `AI求人ProfileからSalesforce/CRM求人として直接推薦し、要件粒度を踏まえて${__dccScore(match)}点に調整しました。`;
+      match.reason = match.documentPassReason;
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__DIRECT_CRM_SCORE_CALIBRATION_BUILD_WRAP_APPLIED__) {
+    global.__DIRECT_CRM_SCORE_CALIBRATION_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesDirectCrmCalibration = buildMatches;
+
+    buildMatches = function buildMatchesWithDirectCrmScoreCalibration(candidate, jobs) {
+      const matches = __prevBuildMatchesDirectCrmCalibration(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      let changed = 0;
+      const adjusted = matches.map(match => {
+        const before = __dccScore(match);
+        const updated = __dccCalibrate(match);
+        if (__dccScore(updated) !== before) changed++;
+        return updated;
+      });
+
+      adjusted.sort((a, b) => __dccScore(b) - __dccScore(a));
+
+      console.log(`Direct CRM score calibration applied. changed=${changed}, total=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Direct CRM score calibration applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
