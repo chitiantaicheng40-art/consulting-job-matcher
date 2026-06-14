@@ -14655,3 +14655,180 @@ if (!global.__DIRECT_CRM_SCORE_CALIBRATION_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: strict product guard for direct CRM recommendations =====
+// Purpose:
+// - Direct CRM recommendations should not over-rank jobs where jobProfile says salesforce=none.
+// - Reskill/SaaS app jobs with programming language requirements should be capped below top Salesforce consultant jobs.
+if (!global.__DIRECT_CRM_STRICT_PRODUCT_GUARD_APPLIED__) {
+  global.__DIRECT_CRM_STRICT_PRODUCT_GUARD_APPLIED__ = true;
+
+  function __dcgText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__dcgText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__dcgText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __dcgScore(match) {
+    const n = Number(match?.score ?? match?.totalScore ?? match?.matchScore ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __dcgSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __dcgRank(match) {
+    const score = __dcgScore(match);
+
+    if (score >= 75) {
+      match.rank = "A";
+      match.documentPassLikelihood = "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.recommendationLevel = "優先提案";
+      match.isRecommended = true;
+    } else if (score >= 55) {
+      match.rank = "B";
+      match.documentPassLikelihood = "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.recommendationLevel = "提案候補";
+      match.isRecommended = true;
+    } else if (score >= 35) {
+      match.rank = "C";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "要確認";
+      match.isRecommended = true;
+    } else {
+      match.rank = "D";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+    }
+
+    return match;
+  }
+
+  function __dcgTextAll(match) {
+    return [
+      __dcgText(match.company),
+      __dcgText(match.position),
+      __dcgText(match.title),
+      __dcgText(match.url),
+      __dcgText(match.aiJobProfile),
+      __dcgText(match.requiredMatched),
+      __dcgText(match.requiredMissing),
+      __dcgText(match.comment)
+    ].join("\n");
+  }
+
+  function __dcgApply(match) {
+    if (!match?.directAiRecommendation?.applied) return match;
+
+    const before = __dcgScore(match);
+    const text = __dcgTextAll(match);
+    const profile = match.aiJobProfile || {};
+    const salesforceReq = profile?.productRequirements?.salesforce || "none";
+
+    let after = before;
+    const notes = [];
+
+    const isPureSalesforceConsultant =
+      /Salesforce コンサルタント|Salesforceコンサルタント|AI×Salesforce|Salesforce等のCRMソリューション/i.test(text);
+
+    const isReskillOrDevLanguage =
+      /リスキル採用|開発言語|Java|JavaScript|プログラミング|SaaSソリューションに興味/i.test(text);
+
+    const isBusinessOpsCorporate =
+      /ビジネスオペレーションリード|コーポレート職|管理部門|財務部|人事部|グローバルまたは複数組織横断/i.test(text);
+
+    if (salesforceReq === "none" && !isPureSalesforceConsultant) {
+      after = Math.min(after, 45);
+      notes.push("求人Profile上Salesforce必須ではないため、直接CRM推薦の上限を45点にしました。");
+    }
+
+    if (isReskillOrDevLanguage && !isPureSalesforceConsultant) {
+      after = Math.min(after, 68);
+      notes.push("リスキル/開発言語要件が強いため、Salesforce経験のみでは上限68点にしました。");
+    }
+
+    if (isBusinessOpsCorporate) {
+      after = Math.min(after, 42);
+      notes.push("ビジネスオペレーション/コーポレート職であり、Salesforce/CRM直接推薦からは距離があるため上限42点にしました。");
+    }
+
+    if (after < before) {
+      __dcgSetScore(match, after);
+      __dcgRank(match);
+
+      match.directCrmStrictProductGuard = {
+        applied: true,
+        before,
+        after,
+        salesforceRequirement: salesforceReq,
+        notes
+      };
+
+      match.documentPassReason = `AI求人Profileの製品要件を踏まえ、${after}点に調整しました。`;
+      match.reason = match.documentPassReason;
+      match.comment = `${match.comment || ""} スコア再調整：${notes.join(" ")}`.trim();
+      match.recommendation_comment = match.comment;
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__DIRECT_CRM_STRICT_PRODUCT_GUARD_BUILD_WRAP_APPLIED__) {
+    global.__DIRECT_CRM_STRICT_PRODUCT_GUARD_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesDirectCrmStrictProductGuard = buildMatches;
+
+    buildMatches = function buildMatchesWithDirectCrmStrictProductGuard(candidate, jobs) {
+      const matches = __prevBuildMatchesDirectCrmStrictProductGuard(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      let changed = 0;
+      const adjusted = matches.map(match => {
+        const before = __dcgScore(match);
+        const updated = __dcgApply(match);
+        if (__dcgScore(updated) !== before) changed++;
+        return updated;
+      });
+
+      adjusted.sort((a, b) => __dcgScore(b) - __dcgScore(a));
+
+      console.log(`Direct CRM strict product guard applied. changed=${changed}, total=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Direct CRM strict product guard applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
