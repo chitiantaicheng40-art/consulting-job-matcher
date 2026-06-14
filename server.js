@@ -12448,3 +12448,241 @@ if (!global.__AI_PROFILE_PRIMARY_SCORING_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: absolute required-match cap =====
+// Purpose:
+// - Final safety cap after all scoring layers.
+// - Even if AI category fit is strong, low required match ratio cannot become A rank.
+// - Prevent 0% required match from showing 80-100 points.
+if (!global.__ABSOLUTE_REQUIRED_MATCH_CAP_APPLIED__) {
+  global.__ABSOLUTE_REQUIRED_MATCH_CAP_APPLIED__ = true;
+
+  function __arcText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__arcText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__arcText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __arcScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __arcSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __arcAppendComment(match, note) {
+    if (!note) return match;
+
+    const current = match.comment || match.reason || "";
+    if (!current) {
+      match.comment = note;
+      match.reason = note;
+    } else if (!String(current).includes(note)) {
+      match.comment = `${current} ${note}`;
+      match.reason = match.reason ? `${match.reason} ${note}` : match.comment;
+    }
+
+    return match;
+  }
+
+  function __arcRank(match) {
+    const s = __arcScore(match);
+
+    if (s >= 75) {
+      match.rank = "A";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+    } else if (s >= 55) {
+      match.rank = "B";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+    } else if (s >= 35) {
+      match.rank = "C";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    } else {
+      match.rank = "D";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    }
+
+    return match;
+  }
+
+  function __arcArrays(match) {
+    const matched = [
+      ...(Array.isArray(match.matchedRequired) ? match.matchedRequired : []),
+      ...(Array.isArray(match.matchedRequiredRequirements) ? match.matchedRequiredRequirements : []),
+      ...(Array.isArray(match.matchedMust) ? match.matchedMust : []),
+      ...(Array.isArray(match.requiredMatched) ? match.requiredMatched : []),
+      ...(Array.isArray(match.matched_requirements) ? match.matched_requirements : [])
+    ].filter(Boolean);
+
+    const missing = [
+      ...(Array.isArray(match.missingRequired) ? match.missingRequired : []),
+      ...(Array.isArray(match.missingRequiredRequirements) ? match.missingRequiredRequirements : []),
+      ...(Array.isArray(match.unmatchedRequired) ? match.unmatchedRequired : []),
+      ...(Array.isArray(match.unmatchedRequiredRequirements) ? match.unmatchedRequiredRequirements : []),
+      ...(Array.isArray(match.missingMust) ? match.missingMust : []),
+      ...(Array.isArray(match.unmatched_requirements) ? match.unmatched_requirements : [])
+    ].filter(Boolean);
+
+    return { matched, missing };
+  }
+
+  function __arcParseReason(match) {
+    const text = [
+      __arcText(match.reason),
+      __arcText(match.comment),
+      __arcText(match)
+    ].join("\n");
+
+    // Examples:
+    // 必須一致率14%（3/21）
+    // 必須一致率0%（0/7）
+    const m = text.match(/必須一致率\s*([0-9]+)\s*%?\s*[（(]\s*([0-9]+)\s*\/\s*([0-9]+)\s*[）)]/);
+
+    if (m) {
+      const percent = Number(m[1]);
+      const matchedCount = Number(m[2]);
+      const totalCount = Number(m[3]);
+
+      return {
+        ratio: Number.isFinite(percent) ? percent / 100 : matchedCount / Math.max(1, totalCount),
+        matchedCount,
+        totalCount,
+        missingCount: Math.max(0, totalCount - matchedCount),
+        source: "reason_text"
+      };
+    }
+
+    return null;
+  }
+
+  function __arcRequiredInfo(match) {
+    const parsed = __arcParseReason(match);
+    if (parsed) return parsed;
+
+    const { matched, missing } = __arcArrays(match);
+    const total = matched.length + missing.length;
+
+    if (total > 0) {
+      return {
+        ratio: matched.length / Math.max(1, total),
+        matchedCount: matched.length,
+        totalCount: total,
+        missingCount: missing.length,
+        source: "arrays"
+      };
+    }
+
+    return {
+      ratio: null,
+      matchedCount: 0,
+      totalCount: 0,
+      missingCount: 0,
+      source: "none"
+    };
+  }
+
+  function __arcApply(match) {
+    const info = __arcRequiredInfo(match);
+
+    if (info.ratio === null) return match;
+
+    let cap = 100;
+    const notes = [];
+
+    if (info.matchedCount === 0 && info.totalCount > 0) {
+      cap = Math.min(cap, 25);
+      notes.push("必須一致が0件のため、最終スコア上限を25点に制限しました。");
+    } else if (info.ratio < 0.30) {
+      cap = Math.min(cap, 45);
+      notes.push("必須一致率が30%未満のため、最終スコア上限を45点に制限しました。");
+    } else if (info.ratio < 0.50) {
+      cap = Math.min(cap, 60);
+      notes.push("必須一致率が50%未満のため、最終スコア上限を60点に制限しました。");
+    } else if (info.ratio < 0.70) {
+      cap = Math.min(cap, 75);
+      notes.push("必須一致率が70%未満のため、最終スコア上限を75点に制限しました。");
+    }
+
+    if (info.missingCount >= 15) {
+      cap = Math.min(cap, 35);
+      notes.push("不足必須が15件以上のため、最終スコア上限を35点に制限しました。");
+    } else if (info.missingCount >= 10) {
+      cap = Math.min(cap, 45);
+      notes.push("不足必須が10件以上のため、最終スコア上限を45点に制限しました。");
+    } else if (info.missingCount >= 5) {
+      cap = Math.min(cap, 60);
+      notes.push("不足必須が5件以上のため、最終スコア上限を60点に制限しました。");
+    }
+
+    const before = __arcScore(match);
+    const after = Math.min(before, cap);
+
+    if (after < before) {
+      __arcSetScore(match, after);
+      __arcRank(match);
+
+      match.absoluteRequiredMatchCap = {
+        applied: true,
+        before,
+        after,
+        cap,
+        requiredRatio: info.ratio,
+        matchedCount: info.matchedCount,
+        missingCount: info.missingCount,
+        totalCount: info.totalCount,
+        source: info.source,
+        notes
+      };
+
+      __arcAppendComment(match, `最終必須上限：${notes.join(" ")}`);
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__ABSOLUTE_REQUIRED_MATCH_CAP_BUILD_WRAP_APPLIED__) {
+    global.__ABSOLUTE_REQUIRED_MATCH_CAP_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatches_absoluteCap = buildMatches;
+
+    buildMatches = function buildMatchesWithAbsoluteRequiredCap(candidate, jobs) {
+      const matches = __prevBuildMatches_absoluteCap(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      const adjusted = matches.map(__arcApply);
+
+      adjusted.sort((a, b) => __arcScore(b) - __arcScore(a));
+
+      console.log(`Absolute required-match cap applied. matches=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Absolute required-match cap applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
