@@ -11292,3 +11292,74 @@ ${candidateText.slice(0, 14000)}
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: AI candidateProfile compatibility fix =====
+// Purpose:
+// - AI candidateProfile uses roleCategories as an object.
+// - Older profile-based matching layer expects candidateProfile.roleCategories as an array.
+// - Keep aiCandidateProfile as rich object, but provide candidateProfile as compatibility view.
+if (!global.__AI_PROFILE_COMPAT_FIX_APPLIED__) {
+  global.__AI_PROFILE_COMPAT_FIX_APPLIED__ = true;
+
+  function __compatSafeArray(value) {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (!value) return [];
+
+    if (typeof value === "object") {
+      return Object.entries(value)
+        .filter(([_, v]) => v && typeof v === "object" && v.match === true)
+        .map(([k]) => k);
+    }
+
+    return [];
+  }
+
+  function __compatMakeCandidateProfileForOldMatcher(aiProfile) {
+    if (!aiProfile || typeof aiProfile !== "object") return aiProfile;
+
+    const roleCategoryList = Array.isArray(aiProfile.roleCategoryList)
+      ? aiProfile.roleCategoryList
+      : __compatSafeArray(aiProfile.roleCategories);
+
+    return {
+      ...aiProfile,
+      roleCategories: roleCategoryList,
+      roleCategoryList,
+      productLevels: aiProfile.productLevels || {},
+      strengths: aiProfile.strengths || [],
+      negativeSignals: aiProfile.riskFlags || aiProfile.negativeSignals || [],
+      industries: aiProfile.industries || [],
+      education: aiProfile.education || {},
+      location: aiProfile.location || {}
+    };
+  }
+
+  if (typeof analyzeResumeWithVision === "function" && !global.__AI_PROFILE_COMPAT_ANALYZE_WRAP_APPLIED__) {
+    global.__AI_PROFILE_COMPAT_ANALYZE_WRAP_APPLIED__ = true;
+
+    const __prevAnalyzeResumeWithVision_aiCompat = analyzeResumeWithVision;
+
+    analyzeResumeWithVision = async function analyzeResumeWithAIProfileCompat(buffer) {
+      const candidate = await __prevAnalyzeResumeWithVision_aiCompat(buffer);
+
+      if (candidate && candidate.aiCandidateProfile) {
+        candidate.candidateProfile = __compatMakeCandidateProfileForOldMatcher(candidate.aiCandidateProfile);
+        candidate.roleCategories = candidate.candidateProfile.roleCategories;
+        candidate.productLevels = candidate.candidateProfile.productLevels;
+
+        console.log("===== AI candidateProfile compatibility view generated =====");
+        console.log({
+          primaryRole: candidate.candidateProfile.primaryRole,
+          roleCategories: candidate.candidateProfile.roleCategories,
+          productLevels: candidate.candidateProfile.productLevels
+        });
+      }
+
+      return candidate;
+    };
+
+    console.log("===== AI candidateProfile compatibility fix applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
