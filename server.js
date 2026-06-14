@@ -12086,3 +12086,365 @@ if (!global.__FINAL_AI_PROFILE_RERANKER_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: AI profile primary scoring =====
+// Purpose:
+// - Stop old keyword score from dominating.
+// - Recalculate final score mainly from AI candidateProfile x AI jobProfile.
+// - Old score is used only as a small supporting signal.
+if (!global.__AI_PROFILE_PRIMARY_SCORING_APPLIED__) {
+  global.__AI_PROFILE_PRIMARY_SCORING_APPLIED__ = true;
+
+  function __apsText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__apsText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__apsText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __apsScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __apsSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __apsRank(match) {
+    const s = __apsScore(match);
+    if (s >= 75) {
+      match.rank = "A";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+    } else if (s >= 55) {
+      match.rank = "B";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+    } else if (s >= 35) {
+      match.rank = "C";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    } else {
+      match.rank = "D";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    }
+    return match;
+  }
+
+  function __apsAppendComment(match, note) {
+    if (!note) return match;
+
+    const current = match.comment || match.reason || "";
+    if (!current) {
+      match.comment = note;
+      match.reason = note;
+    } else if (!String(current).includes(note)) {
+      match.comment = `${current} ${note}`;
+      match.reason = match.reason ? `${match.reason} ${note}` : match.comment;
+    }
+
+    return match;
+  }
+
+  function __apsCandidateProfile(candidate) {
+    return candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
+  }
+
+  function __apsCandidateCategories(candidate) {
+    const p = __apsCandidateProfile(candidate);
+
+    if (Array.isArray(p.roleCategoryList)) return p.roleCategoryList;
+    if (Array.isArray(p.roleCategories)) return p.roleCategories;
+
+    if (p.roleCategories && typeof p.roleCategories === "object") {
+      return Object.entries(p.roleCategories)
+        .filter(([_, v]) => v && v.match === true)
+        .map(([k]) => k);
+    }
+
+    if (Array.isArray(candidate?.roleCategories)) return candidate.roleCategories;
+
+    return [];
+  }
+
+  function __apsCategoryDetail(candidate, key) {
+    const p = __apsCandidateProfile(candidate);
+    const rc = p?.roleCategories;
+
+    if (rc && !Array.isArray(rc) && rc[key]) return rc[key];
+
+    return { match: __apsCandidateCategories(candidate).includes(key), level: "confirmed" };
+  }
+
+  function __apsProductLevel(candidate, key) {
+    const p = __apsCandidateProfile(candidate);
+
+    return (
+      p?.productLevels?.[key] ||
+      candidate?.productLevels?.[key] ||
+      "none"
+    );
+  }
+
+  function __apsJobProfile(match) {
+    return match.aiJobProfile || match.jobProfile || {};
+  }
+
+  function __apsJobCategories(match) {
+    const p = __apsJobProfile(match);
+    return Array.isArray(p.roleCategories) ? p.roleCategories : [];
+  }
+
+  function __apsPrimaryJobCategory(match) {
+    return __apsJobProfile(match).primaryRoleCategory || "";
+  }
+
+  function __apsCoreMust(match) {
+    const p = __apsJobProfile(match);
+    return Array.isArray(p.coreMust) ? p.coreMust : [];
+  }
+
+  function __apsRequiredRatio(match) {
+    const matched = [
+      ...(Array.isArray(match.matchedRequired) ? match.matchedRequired : []),
+      ...(Array.isArray(match.matchedRequiredRequirements) ? match.matchedRequiredRequirements : []),
+      ...(Array.isArray(match.matchedMust) ? match.matchedMust : []),
+      ...(Array.isArray(match.requiredMatched) ? match.requiredMatched : [])
+    ];
+
+    const missing = [
+      ...(Array.isArray(match.missingRequired) ? match.missingRequired : []),
+      ...(Array.isArray(match.missingRequiredRequirements) ? match.missingRequiredRequirements : []),
+      ...(Array.isArray(match.unmatchedRequired) ? match.unmatchedRequired : []),
+      ...(Array.isArray(match.unmatchedRequiredRequirements) ? match.unmatchedRequiredRequirements : []),
+      ...(Array.isArray(match.missingMust) ? match.missingMust : [])
+    ];
+
+    if (matched.length + missing.length > 0) {
+      return {
+        ratio: matched.length / Math.max(1, matched.length + missing.length),
+        matchedCount: matched.length,
+        missingCount: missing.length
+      };
+    }
+
+    return { ratio: null, matchedCount: 0, missingCount: 0 };
+  }
+
+  function __apsComputeAiScore(match, candidate) {
+    const oldScore = __apsScore(match);
+    const candidateCategories = __apsCandidateCategories(candidate);
+    const jobCategories = __apsJobCategories(match);
+    const primary = __apsPrimaryJobCategory(match);
+    const notes = [];
+
+    let aiScore = 0;
+    let cap = 100;
+
+    const overlap = jobCategories.filter(c => candidateCategories.includes(c));
+
+    // 1. Primary category fit: strongest factor
+    if (primary && candidateCategories.includes(primary)) {
+      aiScore += 45;
+      notes.push(`主カテゴリ一致：${primary}`);
+    } else if (overlap.length > 0) {
+      aiScore += 25;
+      notes.push(`関連カテゴリ一致：${overlap.join(" / ")}`);
+    } else {
+      aiScore += 5;
+      cap = Math.min(cap, 45);
+      notes.push("求人カテゴリと候補者カテゴリの一致が弱いため上限を制限しました。");
+    }
+
+    // 2. Product / role strict checks
+    const sfLevel = __apsProductLevel(candidate, "salesforce");
+    const sapLevel = __apsProductLevel(candidate, "sap");
+    const oracleLevel = __apsProductLevel(candidate, "oracle");
+    const salesLevel = __apsProductLevel(candidate, "sales");
+
+    if (primary === "SALESFORCE_CRM") {
+      if (["implementation", "lead"].includes(sfLevel)) {
+        aiScore += 35;
+        notes.push("Salesforce/CRM/CX導入経験が強く一致しています。");
+      } else if (sfLevel === "usage") {
+        aiScore += 15;
+        cap = Math.min(cap, 65);
+        notes.push("Salesforce/CRM利用経験はありますが導入経験は要確認です。");
+      } else {
+        aiScore -= 20;
+        cap = Math.min(cap, 45);
+        notes.push("Salesforce/CRM/CX求人ですが該当経験が確認できません。");
+      }
+    }
+
+    if (primary === "SAP_SPECIALIST") {
+      if (["implementation", "lead"].includes(sapLevel)) {
+        aiScore += 30;
+        notes.push("SAP専門導入経験が一致しています。");
+      } else if (sapLevel === "adoption_or_support") {
+        aiScore -= 20;
+        cap = Math.min(cap, 28);
+        notes.push("SAP/SAC定着化支援はありますがSAP専門導入経験ではないため上限28点です。");
+      } else {
+        aiScore -= 30;
+        cap = Math.min(cap, 20);
+        notes.push("SAP専門求人ですがSAP経験が確認できません。");
+      }
+    }
+
+    if (primary === "ORACLE_ERP") {
+      if (["implementation", "lead"].includes(oracleLevel)) {
+        aiScore += 30;
+        notes.push("Oracle ERP/Fusion/OCI導入経験が一致しています。");
+      } else {
+        aiScore -= 30;
+        cap = Math.min(cap, 20);
+        notes.push("Oracle ERP/Fusion/OCI求人ですが該当導入経験が確認できません。");
+      }
+    }
+
+    if (primary === "SALES_ALLIANCE") {
+      if (salesLevel === "confirmed" || candidateCategories.includes("SALES_ALLIANCE")) {
+        aiScore += 30;
+        notes.push("営業/アライアンス経験が一致しています。");
+      } else {
+        aiScore -= 30;
+        cap = Math.min(cap, 20);
+        notes.push("営業/アライアンス求人ですが本人の営業経験が確認できません。");
+      }
+    }
+
+    // 3. Adjacent fit
+    const adjacent = ["IT_CONSULT_DELIVERY", "PM_PL", "PMO", "BUSINESS_TRANSFORMATION", "DATA_ANALYTICS", "CLOUD_INFRA"];
+    if (adjacent.includes(primary) && candidateCategories.some(c => adjacent.includes(c))) {
+      aiScore += 20;
+      notes.push("IT/PM/業務変革/データ活用領域の親和性があります。");
+    }
+
+    if (primary === "GENERAL" && overlap.length > 0) {
+      aiScore += 15;
+    }
+
+    // 4. Core must category match
+    const core = __apsCoreMust(match);
+    const coreCats = [...new Set(core.map(x => x && x.category).filter(Boolean))];
+    const meaningfulCoreCats = coreCats.filter(c => !["EDUCATION", "LANGUAGE", "LOCATION", "EXPERIENCE_YEARS", "OTHER"].includes(c));
+
+    if (meaningfulCoreCats.length > 0) {
+      const coreMatched = meaningfulCoreCats.filter(c => candidateCategories.includes(c));
+      const ratio = coreMatched.length / meaningfulCoreCats.length;
+
+      if (ratio >= 0.7) {
+        aiScore += 20;
+        notes.push("Core mustカテゴリの一致率が高いです。");
+      } else if (ratio >= 0.4) {
+        aiScore += 10;
+        notes.push("Core mustカテゴリが一部一致しています。");
+      } else {
+        aiScore -= 15;
+        cap = Math.min(cap, 45);
+        notes.push("Core mustカテゴリの一致が弱いため減点しました。");
+      }
+    }
+
+    // 5. Old score only as weak support
+    aiScore += Math.min(15, Math.max(0, oldScore) * 0.15);
+
+    // 6. Required ratio cap
+    const req = __apsRequiredRatio(match);
+    if (req.ratio !== null) {
+      if (req.ratio < 0.3) {
+        cap = Math.min(cap, 35);
+        notes.push("旧必須一致率が30%未満のため上限35点です。");
+      } else if (req.ratio < 0.5) {
+        cap = Math.min(cap, 55);
+        notes.push("旧必須一致率が50%未満のため上限55点です。");
+      }
+    }
+
+    if (req.missingCount >= 8) {
+      cap = Math.min(cap, 45);
+      notes.push("不足必須が8件以上のため上限45点です。");
+    } else if (req.missingCount >= 5) {
+      cap = Math.min(cap, 55);
+      notes.push("不足必須が5件以上のため上限55点です。");
+    }
+
+    const finalScore = Math.min(cap, Math.max(0, aiScore));
+
+    return {
+      finalScore,
+      aiScore,
+      oldScore,
+      cap,
+      primary,
+      candidateCategories,
+      jobCategories,
+      overlap,
+      notes
+    };
+  }
+
+  if (typeof buildMatches === "function" && !global.__AI_PROFILE_PRIMARY_SCORE_BUILD_WRAP_APPLIED__) {
+    global.__AI_PROFILE_PRIMARY_SCORE_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatches_aiPrimaryScore = buildMatches;
+
+    buildMatches = function buildMatchesWithAiProfilePrimaryScoring(candidate, jobs) {
+      const matches = __prevBuildMatches_aiPrimaryScore(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      const profile = __apsCandidateProfile(candidate);
+      if (!profile || (!profile.roleCategories && !profile.roleCategoryList)) {
+        console.log("AI profile primary scoring skipped: no candidate AI profile.");
+        return matches;
+      }
+
+      const adjusted = matches.map(match => {
+        const result = __apsComputeAiScore(match, candidate);
+
+        __apsSetScore(match, result.finalScore);
+        __apsRank(match);
+
+        match.aiPrimaryScoring = {
+          applied: true,
+          ...result
+        };
+
+        if (result.notes.length > 0) {
+          __apsAppendComment(match, `AI主導スコア：${result.notes.join(" ")}`);
+        }
+
+        return match;
+      });
+
+      adjusted.sort((a, b) => __apsScore(b) - __apsScore(a));
+
+      console.log(`AI profile primary scoring applied. matches=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== AI profile primary scoring applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
