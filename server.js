@@ -9513,3 +9513,426 @@ if (typeof buildMatches === "function" && !global.__ROLE_FIT_SCORING_PATCH_APPLI
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: core precision controls =====
+// 全体精度改善：
+// 1. 必須一致率が低い場合のスコア上限
+// 2. 勤務地がPDFに明記されていない場合はlocation加点ゼロ
+// 3. 学歴をPDF本文から補完抽出
+if (!global.__CORE_PRECISION_CONTROLS_APPLIED__) {
+  global.__CORE_PRECISION_CONTROLS_APPLIED__ = true;
+
+  function __coreSafeText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__coreSafeText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__coreSafeText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __coreHasAny(text, patterns) {
+    const s = String(text || "");
+    return patterns.some(p => p.test(s));
+  }
+
+  function __coreToArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    return [value];
+  }
+
+  function __coreGetScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __coreSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __coreUpdateRank(match) {
+    const score = __coreGetScore(match);
+
+    if (score >= 70) {
+      match.rank = "A";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.priority = match.priority || "高";
+    } else if (score >= 50) {
+      match.rank = "B";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.priority = match.priority || "中";
+    } else if (score >= 30) {
+      match.rank = "C";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.priority = "優先低";
+    } else {
+      match.rank = "D";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.priority = "対象外寄り";
+    }
+
+    return match;
+  }
+
+  function __coreAppendComment(match, note) {
+    if (!note) return match;
+
+    const current = match.comment || match.reason || "";
+    if (!current) {
+      match.comment = note;
+      match.reason = note;
+      return match;
+    }
+
+    if (!String(current).includes(note)) {
+      match.comment = `${current} ${note}`;
+      match.reason = match.reason ? `${match.reason} ${note}` : match.comment;
+    }
+
+    return match;
+  }
+
+  function __coreRequiredArrays(match) {
+    const matched = [
+      ...__coreToArray(match.matchedRequired),
+      ...__coreToArray(match.matchedRequiredRequirements),
+      ...__coreToArray(match.matchedMust),
+      ...__coreToArray(match.matchedMustRequirements),
+      ...__coreToArray(match.requiredMatched),
+      ...__coreToArray(match.matched_requirements)
+    ].filter(Boolean);
+
+    const missing = [
+      ...__coreToArray(match.missingRequired),
+      ...__coreToArray(match.missingRequiredRequirements),
+      ...__coreToArray(match.unmatchedRequired),
+      ...__coreToArray(match.unmatchedRequiredRequirements),
+      ...__coreToArray(match.missingMust),
+      ...__coreToArray(match.missingMustRequirements),
+      ...__coreToArray(match.unmatched_requirements)
+    ].filter(Boolean);
+
+    return { matched, missing };
+  }
+
+  function __coreRequiredRatio(match) {
+    const { matched, missing } = __coreRequiredArrays(match);
+
+    if (matched.length + missing.length > 0) {
+      const total = matched.length + missing.length;
+      return {
+        matchedCount: matched.length,
+        missingCount: missing.length,
+        totalCount: total,
+        ratio: matched.length / Math.max(1, total)
+      };
+    }
+
+    const text = __coreSafeText(match);
+    const m = text.match(/必須一致率\s*([0-9]+)\s*%?\s*[（(]\s*([0-9]+)\s*\/\s*([0-9]+)\s*[）)]/);
+
+    if (m) {
+      const matchedCount = Number(m[2]);
+      const totalCount = Number(m[3]);
+      return {
+        matchedCount,
+        missingCount: Math.max(0, totalCount - matchedCount),
+        totalCount,
+        ratio: matchedCount / Math.max(1, totalCount)
+      };
+    }
+
+    return {
+      matchedCount: 0,
+      missingCount: 0,
+      totalCount: 0,
+      ratio: null
+    };
+  }
+
+  function __coreCandidateHasExplicitLocation(candidateText) {
+    return __coreHasAny(candidateText, [
+      /希望勤務地/,
+      /勤務地希望/,
+      /現住所/,
+      /居住地/,
+      /在住/,
+      /東京都/,
+      /東京在住/,
+      /大阪府/,
+      /大阪在住/,
+      /愛知県/,
+      /名古屋/,
+      /福岡県/,
+      /福岡在住/,
+      /首都圏/,
+      /関東/,
+      /関西/,
+      /リモート希望/,
+      /全国可/
+    ]);
+  }
+
+  function __coreCandidateHasEducation(candidateText) {
+    return __coreHasAny(candidateText, [
+      /大学.*卒業/,
+      /大学.*卒/,
+      /学部.*卒業/,
+      /学部.*卒/,
+      /大学院.*修了/,
+      /修士/,
+      /博士/,
+      /Bachelor/i,
+      /Master/i,
+      /明治大学/,
+      /早稲田大学/,
+      /慶應義塾大学/,
+      /東京大学/,
+      /京都大学/,
+      /大阪大学/,
+      /一橋大学/,
+      /九州大学/,
+      /北海道大学/,
+      /東北大学/,
+      /名古屋大学/,
+      /神戸大学/,
+      /上智大学/,
+      /同志社大学/,
+      /立命館大学/,
+      /関西学院大学/,
+      /関西大学/
+    ]);
+  }
+
+  function __coreInferEducationFromText(text) {
+    const s = String(text || "");
+
+    const universityPatterns = [
+      /([一-龠ぁ-んァ-ヶA-Za-z0-9ー・\s]+大学院)[^\n。]*?(修了|卒業|卒)/,
+      /([一-龠ぁ-んァ-ヶA-Za-z0-9ー・\s]+大学)[^\n。]*?(学部|学科|専攻)?[^\n。]*?(卒業|卒)/,
+      /([一-龠ぁ-んァ-ヶA-Za-z0-9ー・\s]+大学)([一-龠ぁ-んァ-ヶA-Za-z0-9ー・\s]*学部)?/
+    ];
+
+    for (const p of universityPatterns) {
+      const m = s.match(p);
+      if (m) {
+        const raw = m[0].replace(/\s+/g, " ").trim();
+        const school = (m[1] || "").replace(/\s+/g, "").trim();
+        return {
+          hasDegree: true,
+          level: /大学院|修士|Master/i.test(raw) ? "大学院修了" : "大学卒",
+          school,
+          raw
+        };
+      }
+    }
+
+    if (__coreCandidateHasEducation(s)) {
+      return {
+        hasDegree: true,
+        level: "大学卒以上",
+        school: "",
+        raw: "大学卒業情報あり"
+      };
+    }
+
+    return {
+      hasDegree: false,
+      level: "",
+      school: "",
+      raw: ""
+    };
+  }
+
+  async function __coreExtractPdfTextFromBuffer(buffer) {
+    try {
+      const pdfParse = require("pdf-parse");
+      const data = await pdfParse(buffer);
+      return data?.text || "";
+    } catch (e) {
+      console.error("core precision: pdf text extraction skipped:", e.message);
+      return "";
+    }
+  }
+
+  // 3. 学歴補完：analyzeResumeWithVisionの返却candidateにeducationを補完する
+  if (typeof analyzeResumeWithVision === "function" && !global.__EDUCATION_EXTRACTION_PATCH_APPLIED__) {
+    global.__EDUCATION_EXTRACTION_PATCH_APPLIED__ = true;
+
+    const __prevAnalyzeResumeWithVision_coreEducation = analyzeResumeWithVision;
+
+    analyzeResumeWithVision = async function analyzeResumeWithEducationFallback(buffer) {
+      const candidate = await __prevAnalyzeResumeWithVision_coreEducation(buffer);
+
+      const pdfText = await __coreExtractPdfTextFromBuffer(buffer);
+      const candidateText = __coreSafeText(candidate);
+      const combinedText = `${candidateText}\n${pdfText}`;
+
+      const education = __coreInferEducationFromText(combinedText);
+
+      if (education.hasDegree) {
+        candidate.education = candidate.education || {};
+        if (typeof candidate.education === "string") {
+          candidate.education = { raw: candidate.education };
+        }
+
+        candidate.education.hasDegree = true;
+        candidate.education.level = candidate.education.level || education.level;
+        candidate.education.school = candidate.education.school || education.school;
+        candidate.education.raw = candidate.education.raw || education.raw;
+
+        candidate.educationLevel = candidate.educationLevel || education.level;
+        candidate.university = candidate.university || education.school;
+        candidate.hasUniversityDegree = true;
+
+        const evidence = Array.isArray(candidate.evidence) ? candidate.evidence : [];
+        if (education.raw && !evidence.includes(education.raw)) {
+          evidence.push(education.raw);
+        }
+        candidate.evidence = evidence;
+      }
+
+      // locationがPDFに明記されていない場合はunknown扱いに寄せる
+      if (!__coreCandidateHasExplicitLocation(combinedText)) {
+        candidate.location = candidate.location || "";
+        candidate.locationConfidence = "unknown";
+        candidate.locationEvidence = "";
+      }
+
+      candidate.rawResumeTextForValidation = candidate.rawResumeTextForValidation || pdfText.slice(0, 5000);
+
+      return candidate;
+    };
+
+    console.log("===== Education extraction patch applied =====");
+  }
+
+  // 1,2. buildMatchesに必須一致率キャップ・勤務地補正・学歴補正をかける
+  if (typeof buildMatches === "function" && !global.__CORE_MATCH_PRECISION_PATCH_APPLIED__) {
+    global.__CORE_MATCH_PRECISION_PATCH_APPLIED__ = true;
+
+    const __prevBuildMatches_corePrecision = buildMatches;
+
+    buildMatches = function buildMatchesWithCorePrecisionControls(candidate, jobs) {
+      const matches = __prevBuildMatches_corePrecision(candidate, jobs);
+
+      if (!Array.isArray(matches)) return matches;
+
+      const candidateText = __coreSafeText(candidate);
+      const candidateHasLocation = __coreCandidateHasExplicitLocation(candidateText);
+      const candidateHasEducation = __coreCandidateHasEducation(candidateText) || candidate?.hasUniversityDegree === true;
+
+      const adjusted = matches.map(match => {
+        let score = __coreGetScore(match);
+        let cap = 100;
+        let penalty = 0;
+        let bonus = 0;
+        const notes = [];
+
+        const ratioInfo = __coreRequiredRatio(match);
+        const requiredRatio = ratioInfo.ratio;
+        const missingCount = ratioInfo.missingCount;
+
+        // 1. 必須一致率が低い場合のスコア上限
+        if (requiredRatio !== null) {
+          if (requiredRatio < 0.30) {
+            cap = Math.min(cap, 50);
+            notes.push("必須一致率が30%未満のため、スコア上限を50点に制限しました。");
+          } else if (requiredRatio < 0.50) {
+            cap = Math.min(cap, 65);
+            notes.push("必須一致率が50%未満のため、スコア上限を65点に制限しました。");
+          } else if (requiredRatio < 0.70) {
+            cap = Math.min(cap, 80);
+            notes.push("必須一致率が70%未満のため、スコア上限を80点に制限しました。");
+          }
+        }
+
+        if (missingCount >= 8) {
+          cap = Math.min(cap, 65);
+          notes.push("不足している必須条件が8件以上あるため、スコア上限を65点に制限しました。");
+        } else if (missingCount >= 5) {
+          cap = Math.min(cap, 75);
+          notes.push("不足している必須条件が5件以上あるため、スコア上限を75点に制限しました。");
+        }
+
+        // 2. 勤務地不明時のlocation加点ゼロ
+        const breakdown = match.scoreBreakdown || match.breakdown || match.scoreDetail || null;
+
+        if (!candidateHasLocation && breakdown && typeof breakdown === "object") {
+          const locScore = Number(breakdown.location ?? breakdown.locations ?? breakdown.area ?? 0);
+
+          if (Number.isFinite(locScore) && locScore > 0) {
+            penalty += locScore;
+
+            if ("location" in breakdown) breakdown.location = 0;
+            if ("locations" in breakdown) breakdown.locations = 0;
+            if ("area" in breakdown) breakdown.area = 0;
+
+            notes.push("候補者PDFに希望勤務地・現住所が明記されていないため、勤務地加点を除外しました。");
+          }
+        }
+
+        // 3. 大卒以上条件の補正
+        const matchText = __coreSafeText(match);
+        const arrays = __coreRequiredArrays(match);
+
+        const missingEducation = arrays.missing.some(v => /大学卒|大卒|学士|Bachelor/i.test(__coreSafeText(v)));
+
+        if (candidateHasEducation && missingEducation) {
+          bonus += 5;
+          notes.push("候補者PDFに大学卒業情報があるため、大卒以上条件の不足判定を補正しました。");
+        }
+
+        score = Math.min(cap, score - penalty + bonus);
+
+        __coreSetScore(match, score);
+        __coreUpdateRank(match);
+
+        if (notes.length > 0) {
+          match.corePrecisionAdjustment = {
+            applied: true,
+            cap,
+            penalty,
+            bonus,
+            requiredRatio,
+            missingCount,
+            candidateHasLocation,
+            candidateHasEducation,
+            notes
+          };
+
+          __coreAppendComment(match, `精度補正：${notes.join(" ")}`);
+        }
+
+        return match;
+      });
+
+      adjusted.sort((a, b) => __coreGetScore(b) - __coreGetScore(a));
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Core match precision controls applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
