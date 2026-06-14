@@ -13729,3 +13729,232 @@ if (!global.__SALESFORCE_CRM_RECOVERY_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: strict guard for Salesforce/CRM recovery =====
+// Purpose:
+// - Previous Salesforce/CRM recovery was too broad.
+// - Never recover jobs with 0 required matches.
+// - Only keep recovered CRM matches when the job is clearly Salesforce/CRM/CX and has at least one required match.
+// - Push false recovered jobs back to low-score reference.
+if (!global.__STRICT_SALESFORCE_RECOVERY_GUARD_APPLIED__) {
+  global.__STRICT_SALESFORCE_RECOVERY_GUARD_APPLIED__ = true;
+
+  function __srgText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__srgText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__srgText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __srgScore(match) {
+    const n = Number(match?.score ?? match?.totalScore ?? match?.matchScore ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __srgSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __srgRankLow(match) {
+    match.rank = "D";
+    match.documentPassLikelihood = "低";
+    match.documentPassPossibility = "低";
+    match.passPossibility = "低";
+    match.documentPassProbability = "低";
+    match.priority = "対象外寄り";
+    match.recommendationLevel = "参考・低一致";
+    match.isRecommended = false;
+    match.lowMatch = true;
+    match.displayGroup = "reference_low_match";
+    return match;
+  }
+
+  function __srgRequiredInfo(match) {
+    const matched = Array.isArray(match.requiredMatched) ? match.requiredMatched.length : 0;
+    const missing = Array.isArray(match.requiredMissing) ? match.requiredMissing.length : 0;
+    const total = Number(match.requiredTotal || matched + missing || 0);
+
+    if (total > 0) {
+      return {
+        matched,
+        missing,
+        total,
+        ratio: matched / Math.max(1, total)
+      };
+    }
+
+    const text = [
+      __srgText(match.documentPassReason),
+      __srgText(match.reason),
+      __srgText(match.comment)
+    ].join("\n");
+
+    const m = text.match(/必須一致率\s*([0-9]+)\s*%?\s*[（(]\s*([0-9]+)\s*\/\s*([0-9]+)\s*[）)]/);
+    if (m) {
+      const matchedCount = Number(m[2]);
+      const totalCount = Number(m[3]);
+      return {
+        matched: matchedCount,
+        missing: Math.max(0, totalCount - matchedCount),
+        total: totalCount,
+        ratio: matchedCount / Math.max(1, totalCount)
+      };
+    }
+
+    return { matched: 0, missing: 0, total: 0, ratio: 0 };
+  }
+
+  function __srgJobProfile(match) {
+    return match?.aiJobProfile || match?.jobProfile || {};
+  }
+
+  function __srgJobCategories(match) {
+    const jp = __srgJobProfile(match);
+    return [
+      jp.primaryRoleCategory,
+      ...(Array.isArray(jp.roleCategories) ? jp.roleCategories : []),
+      ...(Array.isArray(match?.aiPrimaryScoring?.jobCategories) ? match.aiPrimaryScoring.jobCategories : [])
+    ].filter(Boolean);
+  }
+
+  function __srgTitleText(match) {
+    return [
+      __srgText(match.company),
+      __srgText(match.position),
+      __srgText(match.title),
+      __srgText(match.jobTitle),
+      __srgText(match.url),
+      __srgText(__srgJobProfile(match)?.displayName),
+      __srgText(__srgJobProfile(match)?.title),
+      __srgText(__srgJobProfile(match)?.summary),
+      __srgText(__srgJobProfile(match)?.coreMust)
+    ].join("\n");
+  }
+
+  function __srgIsClearlyCrm(match) {
+    const cats = __srgJobCategories(match);
+    const text = __srgTitleText(match);
+
+    const categoryOk = cats.includes("SALESFORCE_CRM");
+
+    const titleOk = /Salesforce|CRM|CX\/CRM|CX|Customer|カスタマー|顧客体験|顧客接点|顧客管理/i.test(text);
+
+    const falsePositive = /Microsoftソリューション|調達|購買|Supply|R&D|PLM|バリューチェーン|New Business|SCM|サプライチェーン|物流|生産|製造|Fortience|人的資本|People|HR|SAP|Oracle/i.test(text)
+      && !/Salesforce|CRM|CX\/CRM|AI×Salesforce|CX\/CRMコンサルタント/i.test(text);
+
+    return (categoryOk || titleOk) && !falsePositive;
+  }
+
+  function __srgApply(match) {
+    const req = __srgRequiredInfo(match);
+    const score = __srgScore(match);
+    const wasRecovered = Boolean(match.salesforceCrmRecovery?.applied) ||
+      /Salesforce\/CRM求人として再評価/.test(__srgText(match.comment) + __srgText(match.documentPassReason));
+
+    if (!wasRecovered) return match;
+
+    const clearlyCrm = __srgIsClearlyCrm(match);
+
+    let shouldRevert = false;
+    const notes = [];
+
+    if (req.matched === 0) {
+      shouldRevert = true;
+      notes.push("必須一致が0件のため、Salesforce/CRM復元を取り消しました。");
+    }
+
+    if (req.ratio < 0.30) {
+      shouldRevert = true;
+      notes.push("必須一致率が30%未満のため、Salesforce/CRM復元を取り消しました。");
+    }
+
+    if (!clearlyCrm) {
+      shouldRevert = true;
+      notes.push("求人名・求人Profile上、明確なSalesforce/CRM/CX求人ではないため、復元を取り消しました。");
+    }
+
+    if (shouldRevert) {
+      __srgSetScore(match, Math.min(score, 20));
+      __srgRankLow(match);
+
+      match.strictSalesforceRecoveryGuard = {
+        applied: true,
+        reverted: true,
+        before: score,
+        after: __srgScore(match),
+        requiredMatched: req.matched,
+        requiredTotal: req.total,
+        requiredRatio: req.ratio,
+        clearlyCrm,
+        notes
+      };
+
+      const safe = [
+        `参考候補：最終スコア${__srgScore(match)}点のため、現時点では推薦優先度は低いです。`,
+        req.total > 0 ? `必須一致率${Math.round(req.ratio * 100)}%（${req.matched}/${req.total}）です。` : "",
+        notes.join(" "),
+        "旧キーワード判定・広義CRM判定は参考情報であり、必須条件の一致を優先してください。"
+      ].filter(Boolean).join(" ");
+
+      match.comment = safe;
+      match.recommendation_comment = safe;
+      match.documentPassReason = `最終スコア${__srgScore(match)}点のため、現時点では書類通過可能性は低いです。`;
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__STRICT_SALESFORCE_RECOVERY_GUARD_BUILD_WRAP_APPLIED__) {
+    global.__STRICT_SALESFORCE_RECOVERY_GUARD_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesStrictSalesforceGuard = buildMatches;
+
+    buildMatches = function buildMatchesWithStrictSalesforceRecoveryGuard(candidate, jobs) {
+      const matches = __prevBuildMatchesStrictSalesforceGuard(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      let reverted = 0;
+
+      const adjusted = matches.map(match => {
+        const before = __srgScore(match);
+        const updated = __srgApply(match);
+        if (__srgScore(updated) < before) reverted++;
+        return updated;
+      });
+
+      adjusted.sort((a, b) => __srgScore(b) - __srgScore(a));
+
+      const recommended = adjusted.filter(m => __srgScore(m) >= 35).length;
+      const low = adjusted.length - recommended;
+
+      console.log(`Strict Salesforce recovery guard applied. reverted=${reverted}, recommended=${recommended}, low=${low}, total=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+
+        if (recommended === 0) {
+          match.noStrongMatch = true;
+          match.noStrongMatchMessage = "現時点で35点以上の高一致求人はありません。表示中の求人は参考候補です。";
+        }
+
+        return match;
+      });
+    };
+
+    console.log("===== Strict Salesforce recovery guard applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
