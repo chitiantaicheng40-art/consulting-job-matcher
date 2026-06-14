@@ -12686,3 +12686,278 @@ if (!global.__ABSOLUTE_REQUIRED_MATCH_CAP_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: absolute product mismatch cap =====
+// Purpose:
+// - Apply final product/role mismatch caps AFTER all scoring layers.
+// - Required-match cap alone is not enough: SAP_LIGHT candidate must not score high for SAP_SPECIALIST jobs.
+if (!global.__ABSOLUTE_PRODUCT_MISMATCH_CAP_APPLIED__) {
+  global.__ABSOLUTE_PRODUCT_MISMATCH_CAP_APPLIED__ = true;
+
+  function __apmText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__apmText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__apmText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __apmHas(text, patterns) {
+    const s = String(text || "");
+    return patterns.some(p => p.test(s));
+  }
+
+  function __apmScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __apmSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __apmRank(match) {
+    const s = __apmScore(match);
+
+    if (s >= 75) {
+      match.rank = "A";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+    } else if (s >= 55) {
+      match.rank = "B";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+    } else if (s >= 35) {
+      match.rank = "C";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    } else {
+      match.rank = "D";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    }
+
+    return match;
+  }
+
+  function __apmAppendComment(match, note) {
+    if (!note) return match;
+
+    const current = match.comment || match.reason || "";
+    if (!current) {
+      match.comment = note;
+      match.reason = note;
+    } else if (!String(current).includes(note)) {
+      match.comment = `${current} ${note}`;
+      match.reason = match.reason ? `${match.reason} ${note}` : match.comment;
+    }
+
+    return match;
+  }
+
+  function __apmCandidateProfile(candidate) {
+    return candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
+  }
+
+  function __apmCategory(candidate, key) {
+    const p = __apmCandidateProfile(candidate);
+    const rc = p?.roleCategories;
+
+    if (rc && !Array.isArray(rc) && rc[key]) return rc[key];
+
+    const list = p?.roleCategoryList || p?.roleCategories || candidate?.roleCategories || [];
+    if (Array.isArray(list) && list.includes(key)) {
+      return { match: true, level: "confirmed" };
+    }
+
+    return { match: false, level: "none" };
+  }
+
+  function __apmProduct(candidate, key) {
+    const p = __apmCandidateProfile(candidate);
+    return p?.productLevels?.[key] || candidate?.productLevels?.[key] || "none";
+  }
+
+  function __apmJob(match) {
+    return match?.job || match?.jobData || match?.originalJob || match;
+  }
+
+  function __apmJobText(match) {
+    return [
+      __apmText(__apmJob(match)),
+      __apmText(match.aiJobProfile),
+      __apmText(match.jobProfile),
+      __apmText(match.title),
+      __apmText(match.company)
+    ].join("\n");
+  }
+
+  function __apmPrimaryJob(match) {
+    return (
+      match?.aiJobProfile?.primaryRoleCategory ||
+      match?.jobProfile?.primaryRoleCategory ||
+      ""
+    );
+  }
+
+  function __apmIsSapSpecialistJob(match) {
+    const primary = __apmPrimaryJob(match);
+    const text = __apmJobText(match);
+
+    return primary === "SAP_SPECIALIST" || __apmHas(text, [
+      /SAP/i,
+      /S\/4HANA/i,
+      /SAP\s*アプリケーション/i,
+      /SAPコンサル/i,
+      /SAP導入/i,
+      /SAP\s*(HCM|HXM|PP|MM|SD|FI|CO|PM|PLM|DM|EWM|Ariba|SuccessFactors)/i,
+      /ABAP/i,
+      /Basis/i,
+      /Fiori/i,
+      /BTP/i
+    ]);
+  }
+
+  function __apmIsOracleJob(match) {
+    const primary = __apmPrimaryJob(match);
+    const text = __apmJobText(match);
+
+    return primary === "ORACLE_ERP" || __apmHas(text, [
+      /Oracle\s*Fusion/i,
+      /Oracle\s*Cloud\s*ERP/i,
+      /Oracle\s*ERP/i,
+      /Oracle\s*EPM/i,
+      /Oracle\s*SCM/i,
+      /Oracle\s*HCM/i,
+      /Oracle\s*EBS/i,
+      /OCI/i,
+      /Oracle領域/i
+    ]);
+  }
+
+  function __apmIsSalesJob(match) {
+    const primary = __apmPrimaryJob(match);
+    const text = __apmJobText(match);
+
+    return primary === "SALES_ALLIANCE" || __apmHas(text, [
+      /法人営業/,
+      /ソリューション営業/,
+      /アライアンス/,
+      /アカウント営業/,
+      /パートナー営業/,
+      /プリセールス/,
+      /Sales/i,
+      /Alliance/i,
+      /Account/i,
+      /GTM/i,
+      /売上責任/,
+      /販売実績/
+    ]);
+  }
+
+  function __apmApply(match, candidate) {
+    let score = __apmScore(match);
+    let cap = 100;
+    const notes = [];
+
+    const sapSpecialist = __apmCategory(candidate, "SAP_SPECIALIST");
+    const sapLight = __apmCategory(candidate, "SAP_LIGHT");
+    const oracle = __apmCategory(candidate, "ORACLE_ERP");
+    const sales = __apmCategory(candidate, "SALES_ALLIANCE");
+
+    const sapLevel = __apmProduct(candidate, "sap");
+    const oracleLevel = __apmProduct(candidate, "oracle");
+    const salesLevel = __apmProduct(candidate, "sales");
+
+    if (__apmIsSapSpecialistJob(match)) {
+      if (sapSpecialist.match === true || ["implementation", "lead"].includes(sapLevel)) {
+        // no cap
+      } else if (sapLight.match === true || sapLevel === "adoption_or_support") {
+        cap = Math.min(cap, 28);
+        notes.push("候補者AI判定ではSAP/SAC定着化・支援経験であり、SAP専門導入経験ではないため、SAP専門求人の最終上限を28点に制限しました。");
+      } else {
+        cap = Math.min(cap, 20);
+        notes.push("候補者AI判定でSAP経験が確認できないため、SAP求人の最終上限を20点に制限しました。");
+      }
+    }
+
+    if (__apmIsOracleJob(match)) {
+      if (oracle.match === true || ["implementation", "lead"].includes(oracleLevel)) {
+        // no cap
+      } else {
+        cap = Math.min(cap, 20);
+        notes.push("候補者AI判定でOracle ERP/Fusion/OCI導入経験が確認できないため、Oracle求人の最終上限を20点に制限しました。");
+      }
+    }
+
+    if (__apmIsSalesJob(match)) {
+      if (sales.match === true || salesLevel === "confirmed") {
+        // no cap
+      } else {
+        cap = Math.min(cap, 20);
+        notes.push("候補者AI判定で本人の営業/アライアンス経験が確認できないため、営業系求人の最終上限を20点に制限しました。");
+      }
+    }
+
+    const before = score;
+    const after = Math.min(before, cap);
+
+    if (after < before) {
+      __apmSetScore(match, after);
+      __apmRank(match);
+
+      match.absoluteProductMismatchCap = {
+        applied: true,
+        before,
+        after,
+        cap,
+        sapLevel,
+        oracleLevel,
+        salesLevel,
+        notes
+      };
+
+      __apmAppendComment(match, `最終製品/職種上限：${notes.join(" ")}`);
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__ABSOLUTE_PRODUCT_MISMATCH_CAP_BUILD_WRAP_APPLIED__) {
+    global.__ABSOLUTE_PRODUCT_MISMATCH_CAP_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatches_absoluteProductCap = buildMatches;
+
+    buildMatches = function buildMatchesWithAbsoluteProductMismatchCap(candidate, jobs) {
+      const matches = __prevBuildMatches_absoluteProductCap(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      const adjusted = matches.map(match => __apmApply(match, candidate));
+
+      adjusted.sort((a, b) => __apmScore(b) - __apmScore(a));
+
+      console.log(`Absolute product mismatch cap applied. matches=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Absolute product mismatch cap applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
