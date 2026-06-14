@@ -12961,3 +12961,325 @@ if (!global.__ABSOLUTE_PRODUCT_MISMATCH_CAP_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: display hygiene for low-score matches =====
+// Purpose:
+// - score < 35 should not look like a real recommendation.
+// - Force rank/pass possibility based on final score.
+// - Replace risky "候補者様は〜を有しており" comments for low-score matches.
+// - Prefer score >= 35 matches at top; low-score matches become reference candidates.
+if (!global.__DISPLAY_HYGIENE_LOW_SCORE_APPLIED__) {
+  global.__DISPLAY_HYGIENE_LOW_SCORE_APPLIED__ = true;
+
+  function __dhText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__dhText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__dhText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __dhScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __dhSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __dhGetJob(match) {
+    return match?.job || match?.jobData || match?.originalJob || match;
+  }
+
+  function __dhTitle(match) {
+    const job = __dhGetJob(match);
+    return (
+      match.title ||
+      match.jobTitle ||
+      job.title ||
+      job.jobTitle ||
+      job.name ||
+      ""
+    );
+  }
+
+  function __dhSetTitle(match, title) {
+    if (!title) return match;
+
+    if ("title" in match) match.title = title;
+    if ("jobTitle" in match) match.jobTitle = title;
+
+    const job = __dhGetJob(match);
+    if (job && typeof job === "object") {
+      if ("title" in job) job.title = title;
+      if ("jobTitle" in job) job.jobTitle = title;
+      if ("name" in job) job.name = title;
+    }
+
+    return match;
+  }
+
+  function __dhRankByScore(match) {
+    const score = __dhScore(match);
+
+    if (score >= 75) {
+      match.rank = "A";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.recommendationLevel = "優先提案";
+      match.isRecommended = true;
+    } else if (score >= 55) {
+      match.rank = "B";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.recommendationLevel = "提案候補";
+      match.isRecommended = true;
+    } else if (score >= 35) {
+      match.rank = "C";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "要確認";
+      match.isRecommended = true;
+    } else {
+      match.rank = "D";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+    }
+
+    return match;
+  }
+
+  function __dhRequiredInfo(match) {
+    const text = [
+      __dhText(match.reason),
+      __dhText(match.comment),
+      __dhText(match)
+    ].join("\n");
+
+    const m = text.match(/必須一致率\s*([0-9]+)\s*%?\s*[（(]\s*([0-9]+)\s*\/\s*([0-9]+)\s*[）)]/);
+
+    if (m) {
+      const percent = Number(m[1]);
+      const matchedCount = Number(m[2]);
+      const totalCount = Number(m[3]);
+      return {
+        ratio: Number.isFinite(percent) ? percent / 100 : matchedCount / Math.max(1, totalCount),
+        matchedCount,
+        totalCount,
+        missingCount: Math.max(0, totalCount - matchedCount)
+      };
+    }
+
+    const matched = [
+      ...(Array.isArray(match.matchedRequired) ? match.matchedRequired : []),
+      ...(Array.isArray(match.matchedRequiredRequirements) ? match.matchedRequiredRequirements : []),
+      ...(Array.isArray(match.matchedMust) ? match.matchedMust : []),
+      ...(Array.isArray(match.requiredMatched) ? match.requiredMatched : [])
+    ].filter(Boolean);
+
+    const missing = [
+      ...(Array.isArray(match.missingRequired) ? match.missingRequired : []),
+      ...(Array.isArray(match.missingRequiredRequirements) ? match.missingRequiredRequirements : []),
+      ...(Array.isArray(match.unmatchedRequired) ? match.unmatchedRequired : []),
+      ...(Array.isArray(match.unmatchedRequiredRequirements) ? match.unmatchedRequiredRequirements : []),
+      ...(Array.isArray(match.missingMust) ? match.missingMust : [])
+    ].filter(Boolean);
+
+    const total = matched.length + missing.length;
+
+    if (total > 0) {
+      return {
+        ratio: matched.length / Math.max(1, total),
+        matchedCount: matched.length,
+        totalCount: total,
+        missingCount: missing.length
+      };
+    }
+
+    return {
+      ratio: null,
+      matchedCount: 0,
+      totalCount: 0,
+      missingCount: 0
+    };
+  }
+
+  function __dhCandidateProfile(candidate) {
+    return candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
+  }
+
+  function __dhCandidateSummary(candidate) {
+    const p = __dhCandidateProfile(candidate);
+
+    const primaryRole = p.primaryRole || candidate.primaryRole || "候補者";
+    const categories = Array.isArray(p.roleCategoryList)
+      ? p.roleCategoryList
+      : Array.isArray(p.roleCategories)
+        ? p.roleCategories
+        : [];
+
+    const productLevels = p.productLevels || candidate.productLevels || {};
+
+    return {
+      primaryRole,
+      categories,
+      productLevels
+    };
+  }
+
+  function __dhIsLowScore(match) {
+    return __dhScore(match) < 35;
+  }
+
+  function __dhHasMismatchCap(match) {
+    return Boolean(
+      match.lastMileMismatchCap?.applied ||
+      match.absoluteProductMismatchCap?.applied ||
+      match.finalAiProfileRerank?.applied ||
+      match.aiPrimaryScoring?.applied ||
+      match.absoluteRequiredMatchCap?.applied
+    );
+  }
+
+  function __dhBuildSafeLowScoreComment(match, candidate) {
+    const score = __dhScore(match);
+    const req = __dhRequiredInfo(match);
+    const c = __dhCandidateSummary(candidate);
+
+    const mismatchNotes = [
+      ...(Array.isArray(match.lastMileMismatchCap?.notes) ? match.lastMileMismatchCap.notes : []),
+      ...(Array.isArray(match.absoluteProductMismatchCap?.notes) ? match.absoluteProductMismatchCap.notes : []),
+      ...(Array.isArray(match.absoluteRequiredMatchCap?.notes) ? match.absoluteRequiredMatchCap.notes : []),
+      ...(Array.isArray(match.aiPrimaryScoring?.notes) ? match.aiPrimaryScoring.notes : []),
+      ...(Array.isArray(match.aiJobProfileAdjustment?.notes) ? match.aiJobProfileAdjustment.notes : [])
+    ].filter(Boolean);
+
+    const ratioText = req.ratio === null
+      ? "必須一致率は未算出"
+      : `必須一致率${Math.round(req.ratio * 100)}%（${req.matchedCount}/${req.totalCount}）`;
+
+    const categoryText = c.categories.length > 0
+      ? `候補者AI判定：${c.primaryRole}（${c.categories.join(" / ")}）`
+      : `候補者AI判定：${c.primaryRole}`;
+
+    const productText = c.productLevels
+      ? `製品経験：Salesforce=${c.productLevels.salesforce || "none"} / SAP=${c.productLevels.sap || "none"} / Oracle=${c.productLevels.oracle || "none"} / Sales=${c.productLevels.sales || "none"}`
+      : "";
+
+    const noteText = mismatchNotes.length > 0
+      ? `補正理由：${[...new Set(mismatchNotes)].join(" ")}`
+      : "補正理由：最終スコアが35点未満のため、推薦対象ではなく参考候補として扱います。";
+
+    return [
+      `参考候補：最終スコア${score}点のため、現時点では推薦優先度は低いです。`,
+      ratioText,
+      categoryText,
+      productText,
+      noteText,
+      "旧キーワード判定上の一致条件は参考情報であり、AI構造化判定と必須条件の確認を優先してください。"
+    ].filter(Boolean).join(" ");
+  }
+
+  function __dhApply(match, candidate) {
+    const score = __dhScore(match);
+
+    __dhRankByScore(match);
+
+    match.finalDisplayControl = {
+      applied: true,
+      score,
+      recommendationLevel: match.recommendationLevel,
+      isRecommended: match.isRecommended
+    };
+
+    if (__dhIsLowScore(match)) {
+      match.displayGroup = "reference_low_match";
+      match.lowMatch = true;
+
+      const title = __dhTitle(match);
+      if (title && !/^【参考・低一致】/.test(title)) {
+        __dhSetTitle(match, `【参考・低一致】${title}`);
+      }
+
+      match.comment = __dhBuildSafeLowScoreComment(match, candidate);
+      match.reason = match.reason || "最終スコアが35点未満のため、参考候補として表示しています。";
+
+      match.finalDisplayControl.safeCommentApplied = true;
+      match.finalDisplayControl.lowScoreThreshold = 35;
+    } else {
+      match.displayGroup = "recommended_or_check";
+      match.lowMatch = false;
+
+      if (__dhHasMismatchCap(match) && score < 55) {
+        match.comment = [
+          match.comment || "",
+          "なお、AI構造化判定と必須条件の一致状況を踏まえ、提案前に要件適合の確認が必要です。"
+        ].filter(Boolean).join(" ");
+      }
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__DISPLAY_HYGIENE_LOW_SCORE_BUILD_WRAP_APPLIED__) {
+    global.__DISPLAY_HYGIENE_LOW_SCORE_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesDisplayHygiene = buildMatches;
+
+    buildMatches = function buildMatchesWithDisplayHygiene(candidate, jobs) {
+      const matches = __prevBuildMatchesDisplayHygiene(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      const adjusted = matches.map(match => __dhApply(match, candidate));
+
+      const recommended = adjusted
+        .filter(m => __dhScore(m) >= 35)
+        .sort((a, b) => __dhScore(b) - __dhScore(a));
+
+      const low = adjusted
+        .filter(m => __dhScore(m) < 35)
+        .sort((a, b) => __dhScore(b) - __dhScore(a));
+
+      const merged = [...recommended, ...low];
+
+      const recommendedCount = recommended.length;
+      const lowCount = low.length;
+
+      console.log(`Display hygiene applied. recommended=${recommendedCount}, low=${lowCount}, total=${merged.length}`);
+
+      return merged.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+
+        if (recommendedCount === 0) {
+          match.noStrongMatch = true;
+          match.noStrongMatchMessage = "現時点で35点以上の高一致求人はありません。表示中の求人は参考候補です。";
+        }
+
+        return match;
+      });
+    };
+
+    console.log("===== Display hygiene for low-score matches applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
