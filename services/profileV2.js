@@ -19,10 +19,39 @@ function has(text, re) {
   return re.test(text);
 }
 
-function normalizeCandidateProfileV2(candidate) {
-  const raw = textOf(candidate);
+function candidateResumeTextOnly(candidate) {
+  // IMPORTANT:
+  // Do NOT read entire candidate object or existing AI profile JSON here.
+  // Existing profile contains labels/reasons like "SAP experience is absent",
+  // which causes false positives for SAP/Oracle/Sales/Security.
   const existing = candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
-  const text = `${raw}\n${textOf(existing)}`;
+
+  const parts = [
+    candidate?.resumeText,
+    candidate?.rawText,
+    candidate?.extractedText,
+    candidate?.text,
+    candidate?.ocrText,
+    candidate?.summary,
+    existing?.summary,
+    Array.isArray(candidate?.skills) ? candidate.skills.join(" ") : candidate?.skills,
+    Array.isArray(candidate?.experiences) ? candidate.experiences.map(textOf).join("\n") : "",
+    Array.isArray(candidate?.workExperiences) ? candidate.workExperiences.map(textOf).join("\n") : ""
+  ].filter(Boolean);
+
+  let text = parts.map(textOf).join("\n");
+
+  // Remove diagnostic/category tokens if they leaked in.
+  text = text
+    .replace(/SALESFORCE_CRM|SAP_SPECIALIST|SAP_LIGHT|ORACLE_ERP|SALES_ALLIANCE|CLOUD_INFRA|IT_CONSULT_DELIVERY|DATA_ANALYTICS|DATA_SCIENCE|AI_ENGINEER|SOFTWARE_ENGINEER|EMBEDDED_IOT|CLOUD_APP_ENGINEER|SECURITY|BUSINESS_TRANSFORMATION|PM_PL|PMO/g, " ")
+    .replace(/SAP関連の経験がないため|Oracle ERP関連の経験がないため|営業アライアンスの経験がないため|セキュリティ関連の経験がないため/g, " ");
+
+  return text;
+}
+
+function normalizeCandidateProfileV2(candidate) {
+  const existing = candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
+  const text = candidateResumeTextOnly(candidate);
 
   const roleCategories = new Set();
   const evidence = [];
@@ -138,6 +167,48 @@ function normalizeCandidateProfileV2(candidate) {
   if (has(text, /業務改革|DX推進|改善提案|課題抽出|全体最適|構想策定/i)) {
     roleCategories.add("BUSINESS_TRANSFORMATION");
     evidence.push("業務改善/DX/課題解決経験を検出");
+  }
+
+  // ===== Candidate Profile V2 cleanup guard =====
+  // Remove false positives unless the resume text has strict positive evidence.
+  const strictSap = /S\\/4HANA|SAP\\s*(FI|CO|MM|SD|PP|PM|PLM|EWM|Ariba)|ABAP|Basis|Fiori|BTP|SAP導入|SAP設計|SAP設定|SAPモジュール/i.test(text);
+  const lightSap = /SAP|SAC|SuccessFactors/i.test(text);
+  if (!strictSap && !lightSap) {
+    roleCategories.delete("SAP_SPECIALIST");
+    roleCategories.delete("SAP_LIGHT");
+    productLevels.sap = "none";
+  } else if (!strictSap && lightSap) {
+    roleCategories.delete("SAP_SPECIALIST");
+    roleCategories.add("SAP_LIGHT");
+    productLevels.sap = "adoption_or_support";
+  }
+
+  const strictOracle = /Oracle\\s*(Fusion|Cloud ERP|ERP|EPM|SCM|HCM|EBS)|OCI/i.test(text);
+  if (!strictOracle) {
+    roleCategories.delete("ORACLE_ERP");
+    productLevels.oracle = "none";
+  }
+
+  const strictSales = /法人営業|提案営業|ソリューション営業|プリセールス|アライアンス|アカウント営業|売上責任|販売実績|新規開拓|既存深耕/i.test(textWithoutSalesforce);
+  if (!strictSales) {
+    roleCategories.delete("SALES_ALLIANCE");
+    productLevels.sales = "none";
+  }
+
+  const strictSecurity = /サイバーセキュリティ|SOC|CSIRT|脆弱性診断|ゼロトラスト|インシデント対応|セキュリティ監査|情報セキュリティ/i.test(text);
+  if (!strictSecurity) {
+    roleCategories.delete("SECURITY");
+    productLevels.security = "none";
+  }
+
+  const strictPm = /PM|プロジェクトマネージャー|PL|プロジェクトリーダー|チームリード|進捗管理|課題管理|メンバー管理|マネジメント経験/i.test(text);
+  const onlyMember = /メンバー\\s*\\/\\s*PJ要員|メンバー\\/PJ要員/i.test(text);
+  if (!strictPm || onlyMember) {
+    roleCategories.delete("PM_PL");
+  }
+
+  if (/REST API|WebAPI|API実装|API開発/i.test(text)) {
+    productLevels.api = "implementation";
   }
 
   const categories = Array.from(roleCategories);
