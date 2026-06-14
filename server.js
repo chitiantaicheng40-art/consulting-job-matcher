@@ -13283,3 +13283,139 @@ if (!global.__DISPLAY_HYGIENE_LOW_SCORE_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: sync legacy display fields =====
+// Purpose:
+// - UI still displays legacy fields: documentPassLikelihood / recommendation_comment.
+// - Sync them with final AI/display hygiene fields after all scoring layers.
+if (!global.__SYNC_LEGACY_DISPLAY_FIELDS_APPLIED__) {
+  global.__SYNC_LEGACY_DISPLAY_FIELDS_APPLIED__ = true;
+
+  function __sdfScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __sdfSync(match) {
+    const score = __sdfScore(match);
+
+    if (score < 35) {
+      match.rank = "D";
+
+      // UI often reads this legacy field.
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+
+      match.priority = "対象外寄り";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+      match.lowMatch = true;
+      match.displayGroup = "reference_low_match";
+
+      const safeComment = match.comment || [
+        `参考候補：最終スコア${score}点のため、現時点では推薦優先度は低いです。`,
+        "旧キーワード判定上の一致条件は参考情報であり、AI構造化判定と必須条件の確認を優先してください。"
+      ].join(" ");
+
+      // UI often reads this legacy field.
+      match.recommendation_comment = safeComment;
+      match.comment = safeComment;
+
+      match.documentPassReason = `最終スコア${score}点のため、現時点では書類通過可能性は低いです。`;
+      match.reason = match.reason || match.documentPassReason;
+
+      match.finalLegacyDisplaySync = {
+        applied: true,
+        score,
+        documentPassLikelihood: match.documentPassLikelihood,
+        recommendation_comment: match.recommendation_comment
+      };
+    } else if (score < 55) {
+      match.rank = "C";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.priority = "要確認";
+      match.recommendationLevel = "要確認";
+
+      if (match.comment) {
+        match.recommendation_comment = match.comment;
+      }
+
+      match.finalLegacyDisplaySync = {
+        applied: true,
+        score,
+        documentPassLikelihood: match.documentPassLikelihood
+      };
+    } else if (score < 75) {
+      match.rank = "B";
+      match.documentPassLikelihood = "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.priority = "提案候補";
+      match.recommendationLevel = "提案候補";
+
+      if (match.comment) {
+        match.recommendation_comment = match.comment;
+      }
+
+      match.finalLegacyDisplaySync = {
+        applied: true,
+        score,
+        documentPassLikelihood: match.documentPassLikelihood
+      };
+    } else {
+      match.rank = "A";
+      match.documentPassLikelihood = "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.priority = "優先提案";
+      match.recommendationLevel = "優先提案";
+
+      if (match.comment) {
+        match.recommendation_comment = match.comment;
+      }
+
+      match.finalLegacyDisplaySync = {
+        applied: true,
+        score,
+        documentPassLikelihood: match.documentPassLikelihood
+      };
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__SYNC_LEGACY_DISPLAY_FIELDS_BUILD_WRAP_APPLIED__) {
+    global.__SYNC_LEGACY_DISPLAY_FIELDS_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesSyncLegacyDisplay = buildMatches;
+
+    buildMatches = function buildMatchesWithSyncedLegacyDisplayFields(candidate, jobs) {
+      const matches = __prevBuildMatchesSyncLegacyDisplay(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      const adjusted = matches.map(__sdfSync);
+
+      adjusted.sort((a, b) => __sdfScore(b) - __sdfScore(a));
+
+      console.log(`Legacy display fields synced. matches=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Sync legacy display fields applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
