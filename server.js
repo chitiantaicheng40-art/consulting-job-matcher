@@ -15407,3 +15407,215 @@ if (!global.__DIRECT_ENGINEER_AI_SCORE_CALIBRATION_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: job-text-only guard for direct engineer recommendations =====
+// Purpose:
+// - Previous calibration accidentally read candidate-generated comments.
+// - That made PR/social/corporate jobs look like AI/embedded jobs.
+// - This guard evaluates only job-side fields and caps/removes distant jobs.
+if (!global.__DIRECT_ENGINEER_JOB_TEXT_ONLY_GUARD_APPLIED__) {
+  global.__DIRECT_ENGINEER_JOB_TEXT_ONLY_GUARD_APPLIED__ = true;
+
+  function __dejText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__dejText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__dejText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __dejScore(match) {
+    const n = Number(match?.score ?? match?.totalScore ?? match?.matchScore ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __dejSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __dejRank(match) {
+    const score = __dejScore(match);
+
+    if (score >= 75) {
+      match.rank = "A";
+      match.documentPassLikelihood = "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.recommendationLevel = "優先提案";
+      match.isRecommended = true;
+    } else if (score >= 55) {
+      match.rank = "B";
+      match.documentPassLikelihood = "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.recommendationLevel = "提案候補";
+      match.isRecommended = true;
+    } else if (score >= 35) {
+      match.rank = "C";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "要確認";
+      match.isRecommended = true;
+    } else {
+      match.rank = "D";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+    }
+
+    return match;
+  }
+
+  function __dejJobText(match) {
+    // IMPORTANT:
+    // Do not include match.comment / recommendation_comment here.
+    // Those fields contain candidate skills and will contaminate job classification.
+    return [
+      __dejText(match.company),
+      __dejText(match.position),
+      __dejText(match.title),
+      __dejText(match.url),
+      __dejText(match.aiJobProfile),
+      __dejText(match.requiredMatched),
+      __dejText(match.requiredMissing),
+      __dejText(match.preferredMatched)
+    ].join("\n");
+  }
+
+  function __dejApply(match) {
+    if (!match?.directEngineerAiRecommendation?.applied) return match;
+
+    const before = __dejScore(match);
+    const jobText = __dejJobText(match);
+
+    let after = before;
+    const notes = [];
+
+    const hardNonEngineer =
+      /メディアプロモーター|ソーシャルメディア|広報|PR経験|広告代理店|コンテンツ制作|コミュニティマネジメント|採用ブランディング|コーポレート職/i.test(jobText);
+
+    const pegaOrSpecificPackage =
+      /Pega|PEGA|ServiceNow|Microsoftソリューション|Power Platform/i.test(jobText);
+
+    const legalRisk =
+      /クライアントデータ保護|法務|コンプライアンス|倫理|テクノロジーリスク|規制対応|リスク特定|AIガバナンス|10～15年|10-15年/i.test(jobText);
+
+    const heavyPm =
+      /プログラム・プロジェクト・サービスマネジメント|100名以上|PMP|PMBOK|プロジェクト管理知識|プロジェクト\/チームの管理経験/i.test(jobText);
+
+    const heavyIndustryQualification =
+      /社会インフラDX|専任技術資格|施工管理技士|技術士|建設\/建築|エネルギー\/通信\/インフラ業界/i.test(jobText);
+
+    const javaHard =
+      /Java開発経験2年以上|JavaもしくはC#|JavaまたはC#|C#によるプログラミング|Spring|Angular|React|Typescript/i.test(jobText);
+
+    const strongAiData =
+      /AIアーキテクト|データサイエンティスト|データドリブン|生成AI|LLM|機械学習|Machine Learning|データ分析領域/i.test(jobText);
+
+    const strongEmbeddedIx =
+      /製品・サービス開発DX|インダストリーX|車載|組み込み|組込み|IoT|ECU|画像・動画認識|機械学習\\(Python\\)/i.test(jobText);
+
+    const strongCloudApp =
+      /クラウド上でのアジャイル開発|Cloud|クラウド|モダナイゼーション|AMO|アプリケーション|API開発/i.test(jobText);
+
+    if (hardNonEngineer) {
+      after = Math.min(after, 25);
+      notes.push("PR/広報/メディア/コーポレート寄り求人のため、Engineer直接推薦からは外れます。");
+    } else if (legalRisk) {
+      after = Math.min(after, 30);
+      notes.push("法務/コンプライアンス/リスク系求人のため、候補者経験と距離があります。");
+    } else if (pegaOrSpecificPackage) {
+      after = Math.min(after, 42);
+      notes.push("特定パッケージ/製品要件が強く、候補者経験との直接一致が弱いため上限42点にしました。");
+    } else if (heavyPm) {
+      after = Math.min(after, 42);
+      notes.push("大規模PM/サービスマネジメント要件が強いため上限42点にしました。");
+    } else if (heavyIndustryQualification) {
+      after = Math.min(after, 42);
+      notes.push("特定業界・資格要件が強いため上限42点にしました。");
+    } else if (javaHard) {
+      after = Math.min(after, 58);
+      notes.push("Java/C#/フロントエンド要件が強く、候補者はPython/C中心のため上限58点にしました。");
+    } else if (strongAiData || strongEmbeddedIx) {
+      after = Math.min(after, 76);
+      after = Math.max(after, 62);
+      notes.push("AI/データ/インダストリーX/組み込み系として高めに維持しました。");
+    } else if (strongCloudApp) {
+      after = Math.min(after, 62);
+      after = Math.max(after, 50);
+      notes.push("クラウド/アプリ/モダナイゼーション系として中評価に調整しました。");
+    } else {
+      after = Math.min(after, 45);
+      notes.push("求人側にAI/Cloud/Software/Embeddedの明確な中核要件が弱いため上限45点にしました。");
+    }
+
+    if (after !== before) {
+      __dejSetScore(match, after);
+      __dejRank(match);
+
+      match.directEngineerJobTextOnlyGuard = {
+        applied: true,
+        before,
+        after,
+        notes
+      };
+
+      match.documentPassReason = `求人側の必須条件との距離を踏まえ、${after}点に調整しました。`;
+      match.reason = match.documentPassReason;
+      match.comment = `${match.comment || ""} 求人側要件による再調整：${notes.join(" ")}`.trim();
+      match.recommendation_comment = match.comment;
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__DIRECT_ENGINEER_JOB_TEXT_ONLY_GUARD_BUILD_WRAP_APPLIED__) {
+    global.__DIRECT_ENGINEER_JOB_TEXT_ONLY_GUARD_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesDirectEngineerJobTextOnlyGuard = buildMatches;
+
+    buildMatches = function buildMatchesWithDirectEngineerJobTextOnlyGuard(candidate, jobs) {
+      const matches = __prevBuildMatchesDirectEngineerJobTextOnlyGuard(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      let changed = 0;
+      const adjusted = matches.map(match => {
+        const before = __dejScore(match);
+        const updated = __dejApply(match);
+        if (__dejScore(updated) !== before) changed++;
+        return updated;
+      });
+
+      adjusted.sort((a, b) => __dejScore(b) - __dejScore(a));
+
+      console.log(`Direct Engineer job-text-only guard applied. changed=${changed}, total=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Direct Engineer job-text-only guard applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
