@@ -15849,3 +15849,36 @@ if (!global.__ENGINEER_FINAL_LASTMILE_RANKER_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: switch to Profile V2 scoring only =====
+// Purpose:
+// - Stop candidate-specific direct recommendation patches.
+// - Final matches are generated only by shared Profile V2 scoring.
+if (!global.__PROFILE_V2_SCORING_ONLY_SWITCH_APPLIED__) {
+  global.__PROFILE_V2_SCORING_ONLY_SWITCH_APPLIED__ = true;
+
+  const { buildMatchesV2 } = require("./services/scoringV2");
+
+  if (typeof buildMatches === "function" && !global.__PROFILE_V2_SCORING_ONLY_BUILD_WRAP_APPLIED__) {
+    global.__PROFILE_V2_SCORING_ONLY_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesBeforeProfileV2Only = buildMatches;
+
+    buildMatches = function buildMatchesProfileV2Only(candidate, jobs) {
+      try {
+        const matches = buildMatchesV2(candidate, jobs, { limit: 100 });
+
+        console.log(`Profile V2 scoring only applied. matches=${Array.isArray(matches) ? matches.length : 0}`);
+
+        return matches;
+      } catch (e) {
+        console.warn("Profile V2 scoring only failed. fallback to previous buildMatches:", e.message);
+        return __prevBuildMatchesBeforeProfileV2Only(candidate, jobs);
+      }
+    };
+
+    console.log("===== Profile V2 scoring only switch applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
