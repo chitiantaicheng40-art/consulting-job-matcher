@@ -503,6 +503,55 @@ function scoreJob(candidate, job, cachedProfile) {
     else if (requiredRate < 70) cap = Math.min(cap, 72);
   }
 
+  // Junior / low-experience caps.
+  // General rule: candidates with under 3 years should not score as senior IT strategy / PM / architecture consultants.
+  if (years > 0 && years < 3) {
+    const seniorOrStrategyJob = has(jobText, "シニア|マネジャー|マネージャー|Manager|IT企画|構想策定|IT戦略|アーキテクチャ|アーキテクト|CPO|大規模プロジェクト|プログラム管理|PMO|プロジェクト管理|グローバルプロジェクト");
+    if (seniorOrStrategyJob) {
+      cap = Math.min(cap, 58);
+      notes.push("実務3年未満の若手候補者のため、上流戦略/PM/アーキテクト求人は上限58");
+    }
+  }
+
+  // Hard caps for specialist jobs when candidate-side evidence is missing.
+  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR") && !has(cText, "Unreal|Unity|3DCG|ゲーム|XR|VR|AR")) {
+    cap = Math.min(cap, 25);
+    notes.push("Unreal/Unity/3DCG求人だが候補者に該当経験なし");
+  }
+
+  if (has(jobText, "AIエンジニア|AIアーキテクト|生成AI|LLM|機械学習|データサイエンティスト") && !cCats.has("AI_ENGINEER") && !cCats.has("DATA_SCIENCE")) {
+    cap = Math.min(cap, 35);
+    notes.push("AI/データ専門求人だが候補者にAI/データ実装経験なし");
+  }
+
+  if (has(jobText, "CPOサポート|ビジネスアーキテクチャ|ITトランスフォーメーション|IT企画・構想策定") && years < 3) {
+    cap = Math.min(cap, 58);
+    notes.push("IT構想/ビジネスアーキテクチャ求人だが若手開発者のため上限58");
+  }
+
+  if (has(jobText, "プロジェクトマネジメント能力|プロジェクト管理|プログラム管理|大規模プロジェクト") && years < 3) {
+    cap = Math.min(cap, 52);
+    notes.push("PM/大規模PJ管理要件が強く、実務年数・管理経験が不足");
+  }
+
+  // Do not allow 80+ unless the candidate clearly matches the job's main specialty.
+  const hasStrongSpecialtyMatch =
+    requiredRate >= 80 &&
+    (
+      (isJavaWebCandidate && isJavaWebJob) ||
+      (cCats.has("SALESFORCE_CRM") && has(jobText, "Salesforce|CRM")) ||
+      (cCats.has("AI_ENGINEER") && has(jobText, "AI|生成AI|LLM")) ||
+      (cCats.has("EMBEDDED_IOT") && has(jobText, "組み込み|車載|ECU|IoT")) ||
+      (cCats.has("SAP_SPECIALIST") && has(jobText, "SAP|S/4HANA")) ||
+      (cCats.has("ORACLE_ERP") && has(jobText, "Oracle ERP|Oracle Fusion"))
+    );
+
+  if (!hasStrongSpecialtyMatch && score > 78) {
+    cap = Math.min(cap, 78);
+    notes.push("主専門の強一致ではないため、80点以上は抑制");
+  }
+
+
   score = Math.max(0, Math.min(100, score, cap));
   score = Math.round(score);
 
@@ -557,7 +606,11 @@ function scoreJob(candidate, job, cachedProfile) {
   };
 
   result.recommendation_comment = result.comment;
+  result.recommendationComment = result.comment;
+  result.matchComment = result.comment;
+  result.aiComment = result.comment;
   result.documentPassReason = result.reason;
+  result.passReason = result.reason;
   return result;
 }
 
