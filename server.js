@@ -15619,3 +15619,233 @@ if (!global.__DIRECT_ENGINEER_JOB_TEXT_ONLY_GUARD_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: engineer final last-mile ranker =====
+// Purpose:
+// - Resolve conflicts between previous direct engineer recommendation patches.
+// - Apply one final job-side-only score normalization at the very end.
+if (!global.__ENGINEER_FINAL_LASTMILE_RANKER_APPLIED__) {
+  global.__ENGINEER_FINAL_LASTMILE_RANKER_APPLIED__ = true;
+
+  function __efrText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__efrText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__efrText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __efrScore(match) {
+    const n = Number(match?.score ?? match?.totalScore ?? match?.matchScore ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __efrSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __efrRank(match) {
+    const score = __efrScore(match);
+
+    if (score >= 75) {
+      match.rank = "A";
+      match.documentPassLikelihood = "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.recommendationLevel = "優先提案";
+      match.isRecommended = true;
+    } else if (score >= 55) {
+      match.rank = "B";
+      match.documentPassLikelihood = "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.recommendationLevel = "提案候補";
+      match.isRecommended = true;
+    } else if (score >= 35) {
+      match.rank = "C";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "要確認";
+      match.isRecommended = true;
+    } else {
+      match.rank = "D";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+    }
+
+    return match;
+  }
+
+  function __efrJobText(match) {
+    return [
+      __efrText(match.company),
+      __efrText(match.position),
+      __efrText(match.title),
+      __efrText(match.url),
+      __efrText(match.aiJobProfile),
+      __efrText(match.requiredMatched),
+      __efrText(match.requiredMissing),
+      __efrText(match.preferredMatched)
+    ].join("\n");
+  }
+
+  function __efrApply(match) {
+    if (!match?.directEngineerAiRecommendation?.applied) return match;
+
+    const before = __efrScore(match);
+    const jobText = __efrJobText(match);
+    let after = before;
+    const notes = [];
+
+    const isAiArchitect =
+      /AIアーキテクト/i.test(jobText);
+
+    const isDataScientist =
+      /データサイエンティスト|データドリブン/i.test(jobText);
+
+    const isProductDevDx =
+      /製品・サービス開発DX|設計開発プロセス革新|PLM,ALM,MBSE|機械学習\\(Python\\)|画像・動画認識/i.test(jobText);
+
+    const isAmoModernization =
+      /AMO|モダナイゼーション|レガシーシステム刷新|現行システムを調査/i.test(jobText);
+
+    const isSdetOrJava =
+      /SDET|品質保証|ISTQB|JSTQB|JavaもしくはC#|JavaまたはC#|C#によるプログラミング|Java開発経験2年以上/i.test(jobText);
+
+    const isScrumLead =
+      /デリバリリード|スクラムマスタ|アジャイル CoE|SAFe|LeSS|SPC|SPCT/i.test(jobText);
+
+    const isSocialInfraHeavy =
+      /社会インフラ|建設|建築|不動産|土木|鉄道|航空|海運|官公庁|自治体|専任技術資格|施工管理技士|技術士/i.test(jobText);
+
+    const isPrMediaSocial =
+      /メディアプロモーター|ソーシャルメディア|広報|PR経験|広告代理店|コンテンツ制作|コミュニティマネジメント|採用ブランディング/i.test(jobText);
+
+    const isLegalRisk =
+      /クライアントデータ保護|法務|コンプライアンス|倫理|テクノロジーリスク|規制対応|リスク特定|AIガバナンス/i.test(jobText);
+
+    const isPegaOrSpecificPackage =
+      /Pega|PEGA|ServiceNow|Power Platform|Microsoftソリューション/i.test(jobText);
+
+    const isHeavyPm =
+      /プログラム・プロジェクト・サービスマネジメント|100名以上|PMP|PMBOK|プロジェクト管理知識|プロジェクト\\/チームの管理経験/i.test(jobText);
+
+    const isGenericSystemConsultant =
+      /システムコンサルタント|RPAコンサルタント|業務要件定義|ERPパッケージ|ITプランニング経験/i.test(jobText);
+
+    if (isPrMediaSocial) {
+      after = Math.min(after, 25);
+      notes.push("PR/メディア/ソーシャル系のためEngineer推薦からは距離があります。");
+    } else if (isLegalRisk) {
+      after = Math.min(after, 30);
+      notes.push("法務/リスク/ガバナンス系のため候補者経験と距離があります。");
+    } else if (isSocialInfraHeavy) {
+      after = Math.min(after, 42);
+      notes.push("社会インフラ/建設/資格要件が強いため上限42点にしました。");
+    } else if (isPegaOrSpecificPackage) {
+      after = Math.min(after, 42);
+      notes.push("特定パッケージ要件が強いため上限42点にしました。");
+    } else if (isHeavyPm) {
+      after = Math.min(after, 42);
+      notes.push("大規模PM要件が強いため上限42点にしました。");
+    } else if (isGenericSystemConsultant) {
+      after = Math.min(after, 45);
+      notes.push("汎用システムコンサル/RPA寄りでAI・組み込み中核ではないため上限45点にしました。");
+    } else if (isSdetOrJava) {
+      after = Math.min(after, 58);
+      notes.push("SDET/Java/C#要件が強いため上限58点にしました。");
+    } else if (isScrumLead) {
+      after = Math.min(after, 58);
+      notes.push("リード/スクラムマスタ要件が強いため上限58点にしました。");
+    } else if (isAiArchitect) {
+      after = Math.max(after, 74);
+      after = Math.min(after, 76);
+      notes.push("AIアーキテクト求人として高一致に維持しました。");
+    } else if (isProductDevDx) {
+      after = Math.max(after, 70);
+      after = Math.min(after, 74);
+      notes.push("製品開発DX/インダストリーX求人として高めに再調整しました。");
+    } else if (isDataScientist) {
+      after = Math.max(after, 62);
+      after = Math.min(after, 68);
+      notes.push("データサイエンス求人として中〜高評価に維持しました。");
+    } else if (isAmoModernization) {
+      after = Math.max(after, 55);
+      after = Math.min(after, 62);
+      notes.push("AMO/モダナイゼーション求人として中評価に維持しました。");
+    } else {
+      after = Math.min(after, 50);
+      notes.push("AI/Cloud/Software/Embedded中核求人としては弱いため上限50点にしました。");
+    }
+
+    if (after !== before) {
+      __efrSetScore(match, after);
+      __efrRank(match);
+
+      match.engineerFinalLastmileRanker = {
+        applied: true,
+        before,
+        after,
+        notes
+      };
+
+      match.documentPassReason = `最終補正：求人側要件との距離を踏まえ、${after}点に調整しました。`;
+      match.reason = match.documentPassReason;
+      match.comment = `${match.comment || ""} 最終補正：${notes.join(" ")}`.trim();
+      match.recommendation_comment = match.comment;
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__ENGINEER_FINAL_LASTMILE_RANKER_BUILD_WRAP_APPLIED__) {
+    global.__ENGINEER_FINAL_LASTMILE_RANKER_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesEngineerFinalLastmileRanker = buildMatches;
+
+    buildMatches = function buildMatchesWithEngineerFinalLastmileRanker(candidate, jobs) {
+      const matches = __prevBuildMatchesEngineerFinalLastmileRanker(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      let changed = 0;
+      const adjusted = matches.map(match => {
+        const before = __efrScore(match);
+        const updated = __efrApply(match);
+        if (__efrScore(updated) !== before) changed++;
+        return updated;
+      });
+
+      adjusted.sort((a, b) => __efrScore(b) - __efrScore(a));
+
+      console.log(`Engineer final last-mile ranker applied. changed=${changed}, total=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Engineer final last-mile ranker applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
