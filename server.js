@@ -15202,3 +15202,208 @@ if (!global.__PROFILE_V2_LOGGING_ONLY_APPLIED__) {
 }
 // ===== END PROFILE V2 =====
 
+
+// ===== FINAL OVERRIDE: calibrate direct engineer AI recommendations =====
+// Purpose:
+// - Candidate profile v2 is now clean.
+// - Direct engineer recommendations still over-score adjacent or distant roles.
+// - Calibrate scores based on hard requirements and job distance.
+if (!global.__DIRECT_ENGINEER_AI_SCORE_CALIBRATION_APPLIED__) {
+  global.__DIRECT_ENGINEER_AI_SCORE_CALIBRATION_APPLIED__ = true;
+
+  function __decalText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__decalText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__decalText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __decalScore(match) {
+    const n = Number(match?.score ?? match?.totalScore ?? match?.matchScore ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __decalSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __decalRank(match) {
+    const score = __decalScore(match);
+
+    if (score >= 75) {
+      match.rank = "A";
+      match.documentPassLikelihood = "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.recommendationLevel = "優先提案";
+      match.isRecommended = true;
+    } else if (score >= 55) {
+      match.rank = "B";
+      match.documentPassLikelihood = "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.recommendationLevel = "提案候補";
+      match.isRecommended = true;
+    } else if (score >= 35) {
+      match.rank = "C";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "要確認";
+      match.isRecommended = true;
+    } else {
+      match.rank = "D";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+    }
+
+    return match;
+  }
+
+  function __decalApply(match) {
+    if (!match?.directEngineerAiRecommendation?.applied) return match;
+
+    const before = __decalScore(match);
+    const text = [
+      __decalText(match.company),
+      __decalText(match.position),
+      __decalText(match.title),
+      __decalText(match.aiJobProfile),
+      __decalText(match.requiredMatched),
+      __decalText(match.requiredMissing),
+      __decalText(match.comment)
+    ].join("\n");
+
+    let after = before;
+    const notes = [];
+
+    const isStrongAiData =
+      /AIアーキテクト|データサイエンティスト|データドリブン|生成AI|LLM|機械学習|Machine Learning/i.test(text);
+
+    const isStrongEmbeddedIx =
+      /インダストリーX|製品・サービス開発DX|車載|組み込み|組込み|IoT|ECU|機械学習\\(Python\\)|画像・動画認識/i.test(text);
+
+    const isSdetQa =
+      /SDET|品質保証|ISTQB|JSTQB|JavaもしくはC#|JavaまたはC#|C#によるプログラミング/i.test(text);
+
+    const isLeadScrumAgile =
+      /デリバリリード|スクラムマスタ|アジャイル CoE|SAFe|LeSS|SPC|SPCT|リード/i.test(text);
+
+    const isIndustryOrQualificationHeavy =
+      /社会インフラ|建設|建築|エネルギー|通信|インフラ業界|技術士|施工管理技士|専任技術資格|官公庁|自治体/i.test(text);
+
+    const isLegalRiskProtection =
+      /クライアントデータ保護|法務|コンプライアンス|倫理|テクノロジーリスク|規制対応|リスク特定|10～15年|10-15年/i.test(text);
+
+    const hasHardMissingLanguage =
+      /JavaもしくはC#|JavaまたはC#|C#によるプログラミング/i.test(text);
+
+    // Good fit but not all should be 82.
+    if (isStrongAiData) {
+      after = Math.min(after, 76);
+      after = Math.max(after, 62);
+      notes.push("AI/データ系求人として高めに維持しつつ、直接推薦の上限を76点に調整しました。");
+    }
+
+    if (isStrongEmbeddedIx) {
+      after = Math.min(after, 76);
+      after = Math.max(after, 60);
+      notes.push("インダストリーX/組み込み/製品開発DX系として高めに維持しつつ、上限を76点に調整しました。");
+    }
+
+    if (isSdetQa) {
+      after = Math.min(after, 62);
+      notes.push("SDET/QA/Java/C#要件が強いため、候補者のPython/C中心経験では上限62点にしました。");
+    }
+
+    if (isLeadScrumAgile) {
+      after = Math.min(after, 58);
+      notes.push("リード/スクラムマスタ/アジャイルCoE要件が強いため、上限58点にしました。");
+    }
+
+    if (isIndustryOrQualificationHeavy) {
+      after = Math.min(after, 45);
+      notes.push("特定業界・専任技術資格要件が強いため、上限45点にしました。");
+    }
+
+    if (isLegalRiskProtection) {
+      after = Math.min(after, 30);
+      notes.push("法務/コンプライアンス/リスク系求人であり、候補者経験と距離があるため上限30点にしました。");
+    }
+
+    if (hasHardMissingLanguage && before >= 75) {
+      after = Math.min(after, 60);
+      notes.push("Java/C#必須に対して候補者はPython/C中心のため、追加で上限60点にしました。");
+    }
+
+    if (after !== before) {
+      __decalSetScore(match, after);
+      __decalRank(match);
+
+      match.directEngineerAiScoreCalibration = {
+        applied: true,
+        before,
+        after,
+        notes
+      };
+
+      match.documentPassReason = `AI/Cloud/Software/Embedded系求人として直接推薦後、要件粒度を踏まえて${after}点に調整しました。`;
+      match.reason = match.documentPassReason;
+      match.comment = `${match.comment || ""} スコア調整：${notes.join(" ")}`.trim();
+      match.recommendation_comment = match.comment;
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__DIRECT_ENGINEER_AI_SCORE_CALIBRATION_BUILD_WRAP_APPLIED__) {
+    global.__DIRECT_ENGINEER_AI_SCORE_CALIBRATION_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesDirectEngineerAiScoreCalibration = buildMatches;
+
+    buildMatches = function buildMatchesWithDirectEngineerAiScoreCalibration(candidate, jobs) {
+      const matches = __prevBuildMatchesDirectEngineerAiScoreCalibration(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      let changed = 0;
+      const adjusted = matches.map(match => {
+        const before = __decalScore(match);
+        const updated = __decalApply(match);
+        if (__decalScore(updated) !== before) changed++;
+        return updated;
+      });
+
+      adjusted.sort((a, b) => __decalScore(b) - __decalScore(a));
+
+      console.log(`Direct Engineer AI score calibration applied. changed=${changed}, total=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Direct Engineer AI score calibration applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+

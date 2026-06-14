@@ -258,7 +258,9 @@ function classifyJobProfileV2(jobOrProfile) {
     productRequirements.salesforce = "implementation";
   }
 
-  if (has(text, /SAP|S\/4HANA|ABAP|Basis|FI|CO|MM|SD|PP|Ariba|SuccessFactors/i)) {
+  // SAP must be strict. Do not treat standalone PLM/ALM/MBSE as SAP.
+  // PLM can be general engineering PLM, not SAP PLM.
+  if (has(text, /S\/4HANA|SAP\s*(FI|CO|MM|SD|PP|PM|EWM|Ariba|SuccessFactors|PLM)|ABAP|Basis|Fiori|BTP|SAP導入|SAP設計|SAP設定|SAPモジュール/i)) {
     categories.add("SAP_SPECIALIST");
     productRequirements.sap = "implementation";
   }
