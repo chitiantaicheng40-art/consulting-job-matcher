@@ -171,7 +171,7 @@ function normalizeCandidateProfileV2(candidate) {
 
   // ===== Candidate Profile V2 cleanup guard =====
   // Remove false positives unless the resume text has strict positive evidence.
-  const strictSap = /S\\/4HANA|SAP\\s*(FI|CO|MM|SD|PP|PM|PLM|EWM|Ariba)|ABAP|Basis|Fiori|BTP|SAP導入|SAP設計|SAP設定|SAPモジュール/i.test(text);
+  const strictSap = /S\/4HANA|SAP\\s*(FI|CO|MM|SD|PP|PM|PLM|EWM|Ariba)|ABAP|Basis|Fiori|BTP|SAP導入|SAP設計|SAP設定|SAPモジュール/i.test(text);
   const lightSap = /SAP|SAC|SuccessFactors/i.test(text);
   if (!strictSap && !lightSap) {
     roleCategories.delete("SAP_SPECIALIST");
@@ -202,7 +202,7 @@ function normalizeCandidateProfileV2(candidate) {
   }
 
   const strictPm = /PM|プロジェクトマネージャー|PL|プロジェクトリーダー|チームリード|進捗管理|課題管理|メンバー管理|マネジメント経験/i.test(text);
-  const onlyMember = /メンバー\\s*\\/\\s*PJ要員|メンバー\\/PJ要員/i.test(text);
+  const onlyMember = /メンバー\s*\/\s*PJ要員|メンバー\/PJ要員/i.test(text);
   if (!strictPm || onlyMember) {
     roleCategories.delete("PM_PL");
   }
