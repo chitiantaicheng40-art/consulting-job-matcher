@@ -10736,3 +10736,559 @@ if (!global.__PROFILE_BASED_MATCHING_LAYER_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: AI candidate profile structured judgment =====
+// Purpose:
+// - Stop keyword-only candidate classification.
+// - Let AI judge candidate role categories with evidence.
+// - Especially distinguish:
+//   営業部門向けCRM/Salesforce導入 ≠ 営業/アライアンス経験
+//   SAP/SAC定着化支援 ≠ SAP S/4HANA/ABAP/Basis導入専門経験
+//   Oracle DB利用 ≠ Oracle ERP/Fusion/OCI導入経験
+if (!global.__AI_CANDIDATE_PROFILE_JUDGMENT_APPLIED__) {
+  global.__AI_CANDIDATE_PROFILE_JUDGMENT_APPLIED__ = true;
+
+  function __aiProfileSafeText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__aiProfileSafeText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__aiProfileSafeText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __aiProfileExtractJson(text) {
+    const s = String(text || "").trim();
+
+    try {
+      return JSON.parse(s);
+    } catch (_) {}
+
+    const fenced = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) {
+      try {
+        return JSON.parse(fenced[1]);
+      } catch (_) {}
+    }
+
+    const first = s.indexOf("{");
+    const last = s.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      try {
+        return JSON.parse(s.slice(first, last + 1));
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  function __aiProfileNormalize(profile) {
+    const p = profile && typeof profile === "object" ? profile : {};
+
+    const categories = p.role_categories && typeof p.role_categories === "object" ? p.role_categories : {};
+
+    const normalized = {
+      primaryRole: p.primary_role || p.primaryRole || "UNKNOWN",
+      summary: p.summary || "",
+      yearsExperience: p.years_experience ?? p.yearsExperience ?? null,
+      education: p.education || { hasDegree: false, level: "unknown", evidence: [] },
+      location: p.location || { isKnown: false, value: null, evidence: [] },
+      roleCategories: {},
+      roleCategoryList: [],
+      productLevels: {},
+      strengths: Array.isArray(p.strengths) ? p.strengths : [],
+      riskFlags: Array.isArray(p.risk_flags) ? p.risk_flags : Array.isArray(p.riskFlags) ? p.riskFlags : [],
+      evidenceNotes: Array.isArray(p.evidence_notes) ? p.evidence_notes : []
+    };
+
+    const categoryKeys = [
+      "SALESFORCE_CRM",
+      "SAP_SPECIALIST",
+      "SAP_LIGHT",
+      "ORACLE_ERP",
+      "CLOUD_INFRA",
+      "IT_CONSULT_DELIVERY",
+      "PM_PL",
+      "PMO",
+      "SALES_ALLIANCE",
+      "BUSINESS_TRANSFORMATION",
+      "DATA_ANALYTICS",
+      "SECURITY"
+    ];
+
+    for (const key of categoryKeys) {
+      const raw = categories[key] || categories[key.toLowerCase()] || {};
+      const match = raw.match === true;
+      const level = raw.level || (match ? "confirmed" : "none");
+      const evidence = Array.isArray(raw.evidence) ? raw.evidence : [];
+      const reason = raw.reason || "";
+
+      normalized.roleCategories[key] = {
+        match,
+        level,
+        evidence,
+        reason
+      };
+
+      if (match) normalized.roleCategoryList.push(key);
+    }
+
+    normalized.productLevels.salesforce =
+      normalized.roleCategories.SALESFORCE_CRM?.level || "none";
+
+    if (normalized.roleCategories.SAP_SPECIALIST?.match) {
+      normalized.productLevels.sap = "implementation";
+    } else if (normalized.roleCategories.SAP_LIGHT?.match) {
+      normalized.productLevels.sap = "adoption_or_support";
+    } else {
+      normalized.productLevels.sap = "none";
+    }
+
+    normalized.productLevels.oracle =
+      normalized.roleCategories.ORACLE_ERP?.match ? "implementation" : "none";
+
+    normalized.productLevels.sales =
+      normalized.roleCategories.SALES_ALLIANCE?.match ? "confirmed" : "none";
+
+    return normalized;
+  }
+
+  async function __aiProfileCallOpenAIForCandidate(candidateText) {
+    const OpenAI = require("openai");
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    const systemPrompt = `
+あなたは人材紹介会社のRA/CA向けに、職務経歴書を厳密に構造化するアナリストです。
+目的は、候補者の経験を求人マッチング用に分類することです。
+
+絶対ルール：
+- 根拠文がないカテゴリは match: false にしてください。
+- 単語があるだけで true にしないでください。
+- 本人の職務経験と、顧客部門・対象業務・導入先の言葉を区別してください。
+- 「営業情報」「営業活動」「営業部門」「営業DX」「営業向けCRM」は、本人の営業経験ではありません。
+- SALES_ALLIANCE は、本人が法人営業、ソリューション営業、プリセールス、アライアンス営業、アカウント営業、売上責任、クロージング、販売実績を持つ場合のみ true。
+- 「SAP/SAC導入後の定着化」「説明資料作成」「トレーニング」「KPI設計」「利用促進」は SAP_LIGHT です。SAP_SPECIALIST ではありません。
+- SAP_SPECIALIST は、SAP S/4HANA、ABAP、Basis、Fiori、BTP、SAPモジュール、SAP導入の要件定義/設計/移行/カットオーバー/開発/カスタマイズ等が根拠としてある場合のみ true。
+- Oracle DBやSQL利用は ORACLE_ERP ではありません。Oracle Fusion、Oracle Cloud ERP、Oracle EPM、Oracle HCM、Oracle SCM、OCI導入経験などが必要です。
+- 迷う場合は false にし、risk_flags に「要確認」と書いてください。
+
+出力はJSONのみ。説明文やMarkdownは禁止です。
+`;
+
+    const userPrompt = `
+以下の職務経歴書/候補者情報を読み、求人マッチング用の候補者プロフィールJSONを作成してください。
+
+必ずこのJSONスキーマで返してください。
+
+{
+  "primary_role": "string",
+  "summary": "string",
+  "years_experience": number | null,
+  "education": {
+    "hasDegree": boolean,
+    "level": "bachelor" | "graduate" | "unknown",
+    "school": "string | null",
+    "evidence": ["根拠文"]
+  },
+  "location": {
+    "isKnown": boolean,
+    "value": "string | null",
+    "evidence": ["根拠文"]
+  },
+  "role_categories": {
+    "SALESFORCE_CRM": {
+      "match": boolean,
+      "level": "none" | "usage" | "implementation" | "lead",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "SAP_SPECIALIST": {
+      "match": boolean,
+      "level": "none" | "implementation" | "lead",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "SAP_LIGHT": {
+      "match": boolean,
+      "level": "none" | "adoption_or_support",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "ORACLE_ERP": {
+      "match": boolean,
+      "level": "none" | "implementation" | "lead",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "CLOUD_INFRA": {
+      "match": boolean,
+      "level": "none" | "usage" | "implementation" | "lead",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "IT_CONSULT_DELIVERY": {
+      "match": boolean,
+      "level": "none" | "delivery" | "lead",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "PM_PL": {
+      "match": boolean,
+      "level": "none" | "member" | "lead",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "PMO": {
+      "match": boolean,
+      "level": "none" | "support" | "lead",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "SALES_ALLIANCE": {
+      "match": boolean,
+      "level": "none" | "sales" | "presales" | "alliance",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "BUSINESS_TRANSFORMATION": {
+      "match": boolean,
+      "level": "none" | "support" | "lead",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "DATA_ANALYTICS": {
+      "match": boolean,
+      "level": "none" | "usage" | "implementation",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    },
+    "SECURITY": {
+      "match": boolean,
+      "level": "none" | "usage" | "implementation",
+      "evidence": ["根拠文"],
+      "reason": "string"
+    }
+  },
+  "strengths": ["string"],
+  "risk_flags": ["string"],
+  "evidence_notes": ["string"]
+}
+
+職務経歴書/候補者情報：
+${candidateText.slice(0, 14000)}
+`;
+
+    const response = await client.chat.completions.create({
+      model: process.env.OPENAI_PROFILE_MODEL || "gpt-4o-mini",
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+    });
+
+    const content = response.choices?.[0]?.message?.content || "";
+    const parsed = __aiProfileExtractJson(content);
+    if (!parsed) throw new Error("AI candidate profile JSON parse failed");
+
+    return __aiProfileNormalize(parsed);
+  }
+
+  function __aiProfileAttachToCandidate(candidate, aiProfile) {
+    candidate.aiCandidateProfile = aiProfile;
+    candidate.candidateProfile = aiProfile;
+
+    candidate.primaryRole = aiProfile.primaryRole;
+    candidate.roleCategories = aiProfile.roleCategoryList;
+    candidate.productLevels = aiProfile.productLevels;
+    candidate.negativeSignals = aiProfile.riskFlags;
+
+    if (aiProfile.education?.hasDegree) {
+      candidate.education = candidate.education || {};
+      if (typeof candidate.education === "string") {
+        candidate.education = { raw: candidate.education };
+      }
+      candidate.education.hasDegree = true;
+      candidate.education.level = candidate.education.level || aiProfile.education.level;
+      candidate.education.school = candidate.education.school || aiProfile.education.school;
+      candidate.education.evidence = aiProfile.education.evidence || [];
+      candidate.hasUniversityDegree = true;
+      candidate.educationLevel = candidate.educationLevel || aiProfile.education.level;
+      candidate.university = candidate.university || aiProfile.education.school;
+    }
+
+    if (aiProfile.location) {
+      candidate.locationConfidence = aiProfile.location.isKnown ? "known" : "unknown";
+      candidate.locationEvidence = Array.isArray(aiProfile.location.evidence)
+        ? aiProfile.location.evidence.join(" / ")
+        : "";
+      if (aiProfile.location.isKnown && aiProfile.location.value) {
+        candidate.location = aiProfile.location.value;
+      }
+    }
+
+    return candidate;
+  }
+
+  // Wrap analyzeResumeWithVision so candidate profile is generated by AI after resume extraction.
+  if (typeof analyzeResumeWithVision === "function" && !global.__AI_PROFILE_ANALYZE_WRAP_APPLIED__) {
+    global.__AI_PROFILE_ANALYZE_WRAP_APPLIED__ = true;
+
+    const __prevAnalyzeResumeWithVision_aiProfile = analyzeResumeWithVision;
+
+    analyzeResumeWithVision = async function analyzeResumeWithAICandidateProfile(buffer) {
+      const candidate = await __prevAnalyzeResumeWithVision_aiProfile(buffer);
+
+      const candidateText = [
+        __aiProfileSafeText(candidate.rawResumeTextForValidation),
+        __aiProfileSafeText(candidate)
+      ].join("\n").slice(0, 16000);
+
+      try {
+        const aiProfile = await __aiProfileCallOpenAIForCandidate(candidateText);
+        __aiProfileAttachToCandidate(candidate, aiProfile);
+
+        console.log("===== AI candidateProfile generated =====");
+        console.log(JSON.stringify(aiProfile, null, 2));
+      } catch (e) {
+        console.error("AI candidateProfile generation failed. fallback to existing candidateProfile:", e.message);
+      }
+
+      return candidate;
+    };
+
+    console.log("===== AI candidate profile structured judgment applied =====");
+  }
+
+  // BuildMatches compatibility layer: prefer AI candidate profile when present.
+  if (typeof buildMatches === "function" && !global.__AI_PROFILE_MATCHING_ADJUSTMENT_APPLIED__) {
+    global.__AI_PROFILE_MATCHING_ADJUSTMENT_APPLIED__ = true;
+
+    const __prevBuildMatches_aiProfile = buildMatches;
+
+    function __aiProfileScore(match) {
+      const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function __aiProfileSetScore(match, score) {
+      const fixed = Math.max(0, Math.min(100, Math.round(score)));
+      match.score = fixed;
+      if ("totalScore" in match) match.totalScore = fixed;
+      if ("matchScore" in match) match.matchScore = fixed;
+      return match;
+    }
+
+    function __aiProfileAppendComment(match, note) {
+      if (!note) return match;
+      const current = match.comment || match.reason || "";
+      if (!current) {
+        match.comment = note;
+        match.reason = note;
+      } else if (!String(current).includes(note)) {
+        match.comment = `${current} ${note}`;
+        match.reason = match.reason ? `${match.reason} ${note}` : match.comment;
+      }
+      return match;
+    }
+
+    function __aiProfileGetJob(match) {
+      return match?.job || match?.jobData || match?.originalJob || match;
+    }
+
+    function __aiProfileJobText(match) {
+      return __aiProfileSafeText(__aiProfileGetJob(match));
+    }
+
+    function __aiProfileHas(text, patterns) {
+      const s = String(text || "");
+      return patterns.some(p => p.test(s));
+    }
+
+    buildMatches = function buildMatchesWithAICandidateProfile(candidate, jobs) {
+      const matches = __prevBuildMatches_aiProfile(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      const profile = candidate.aiCandidateProfile || candidate.candidateProfile;
+      if (!profile || !profile.roleCategories) return matches;
+
+      const adjusted = matches.map(match => {
+        const jobText = __aiProfileJobText(match);
+        const notes = [];
+        let score = __aiProfileScore(match);
+        let cap = 100;
+        let penalty = 0;
+        let bonus = 0;
+
+        const rc = profile.roleCategories || {};
+        const salesforce = rc.SALESFORCE_CRM || {};
+        const sapSpecialist = rc.SAP_SPECIALIST || {};
+        const sapLight = rc.SAP_LIGHT || {};
+        const oracleErp = rc.ORACLE_ERP || {};
+        const salesAlliance = rc.SALES_ALLIANCE || {};
+        const itDelivery = rc.IT_CONSULT_DELIVERY || {};
+        const pmpl = rc.PM_PL || {};
+        const transformation = rc.BUSINESS_TRANSFORMATION || {};
+
+        const isSalesJob = __aiProfileHas(jobText, [
+          /営業/,
+          /セールス/,
+          /アライアンス/,
+          /アカウント/,
+          /Sales/i,
+          /Alliance/i,
+          /Account/i,
+          /販売実績/,
+          /GTM/i
+        ]);
+
+        const isSapJob = __aiProfileHas(jobText, [
+          /SAP/i,
+          /S\/4HANA/i,
+          /ABAP/i,
+          /Basis/i,
+          /Fiori/i,
+          /BTP/i,
+          /SAPコンサル/i
+        ]);
+
+        const isOracleJob = __aiProfileHas(jobText, [
+          /Oracle\s*Fusion/i,
+          /Oracle\s*Cloud\s*ERP/i,
+          /Oracle\s*ERP/i,
+          /Oracle\s*EPM/i,
+          /Oracle\s*SCM/i,
+          /Oracle\s*HCM/i,
+          /OCI/i,
+          /Oracle領域/i
+        ]);
+
+        const isSalesforceCrmJob = __aiProfileHas(jobText, [
+          /Salesforce/i,
+          /SFDC/i,
+          /CRM/i,
+          /CX/i,
+          /SFA/i,
+          /Customer/i,
+          /顧客接点/,
+          /顧客データ/,
+          /営業DX/,
+          /マーケティングDX/,
+          /CRM刷新/
+        ]);
+
+        const isItTransformationJob = __aiProfileHas(jobText, [
+          /ITコンサル/,
+          /DX/i,
+          /業務改革/,
+          /業務要件/,
+          /要件定義/,
+          /システム導入/,
+          /基幹システム/,
+          /PMO/i,
+          /プロジェクトマネジメント/
+        ]);
+
+        if (isSalesJob && salesAlliance.match !== true) {
+          penalty += 30;
+          cap = Math.min(cap, 35);
+          notes.push("AI構造化判定で本人の営業/アライアンス経験が確認できないため、営業系求人を減点しました。");
+        }
+
+        if (isSapJob) {
+          if (sapSpecialist.match === true) {
+            bonus += 12;
+            notes.push("AI構造化判定でSAP専門経験が確認できたため加点しました。");
+          } else if (sapLight.match === true) {
+            penalty += 25;
+            cap = Math.min(cap, 65);
+            notes.push("AI構造化判定ではSAP/SAC定着化・支援経験のため、SAP専門求人は減点しました。");
+          } else {
+            penalty += 35;
+            cap = Math.min(cap, 45);
+            notes.push("AI構造化判定でSAP経験が確認できないため、SAP求人を減点しました。");
+          }
+        }
+
+        if (isOracleJob && oracleErp.match !== true) {
+          penalty += 35;
+          cap = Math.min(cap, 45);
+          notes.push("AI構造化判定でOracle ERP/Fusion/OCI導入経験が確認できないため、Oracle求人を減点しました。");
+        }
+
+        if (isSalesforceCrmJob) {
+          if (salesforce.match === true) {
+            bonus += salesforce.level === "lead" ? 22 : salesforce.level === "implementation" ? 18 : 8;
+            notes.push("AI構造化判定でSalesforce/CRM/CX経験が確認できたため加点しました。");
+          } else {
+            penalty += 18;
+            cap = Math.min(cap, 70);
+            notes.push("AI構造化判定でSalesforce/CRM/CX経験が確認できないため減点しました。");
+          }
+        }
+
+        if (isItTransformationJob && (itDelivery.match === true || pmpl.match === true || transformation.match === true)) {
+          bonus += 10;
+          notes.push("AI構造化判定でITデリバリー/PM/業務変革経験が確認できたため加点しました。");
+        }
+
+        score = Math.min(cap, score - penalty + bonus);
+
+        __aiProfileSetScore(match, score);
+
+        match.aiProfileBasedAdjustment = {
+          applied: true,
+          primaryRole: profile.primaryRole,
+          roleCategoryList: profile.roleCategoryList,
+          cap,
+          penalty,
+          bonus,
+          notes
+        };
+
+        if (score >= 70) {
+          match.rank = "A";
+          match.documentPassPossibility = "高";
+          match.passPossibility = "高";
+        } else if (score >= 50) {
+          match.rank = "B";
+          match.documentPassPossibility = "中";
+          match.passPossibility = "中";
+        } else if (score >= 30) {
+          match.rank = "C";
+          match.documentPassPossibility = "低";
+          match.passPossibility = "低";
+        } else {
+          match.rank = "D";
+          match.documentPassPossibility = "低";
+          match.passPossibility = "低";
+        }
+
+        if (notes.length > 0) {
+          __aiProfileAppendComment(match, `AI構造化判定：${notes.join(" ")}`);
+        }
+
+        return match;
+      });
+
+      adjusted.sort((a, b) => __aiProfileScore(b) - __aiProfileScore(a));
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== AI profile based matching adjustment applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
