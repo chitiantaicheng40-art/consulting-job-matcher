@@ -8643,7 +8643,7 @@ extractAccentureManualJobWithAI = async function realExtractAccentureManualJobWi
       .replace(/\\r/g, "\n")
       .replace(/\\t/g, " ")
       .replace(/\\"/g, '"')
-      .replace(/\\\//g, "/");
+      .replace(/\\//g, "/");
 
     // HTML entities
     out = out
@@ -15746,7 +15746,7 @@ if (!global.__ENGINEER_FINAL_LASTMILE_RANKER_APPLIED__) {
       /Pega|PEGA|ServiceNow|Power Platform|Microsoftソリューション/i.test(jobText);
 
     const isHeavyPm =
-      /プログラム・プロジェクト・サービスマネジメント|100名以上|PMP|PMBOK|プロジェクト管理知識|プロジェクト\\/チームの管理経験/i.test(jobText);
+      /プログラム・プロジェクト・サービスマネジメント|100名以上|PMP|PMBOK|プロジェクト管理知識|プロジェクト\/チームの管理経験/i.test(jobText);
 
     const isGenericSystemConsultant =
       /システムコンサルタント|RPAコンサルタント|業務要件定義|ERPパッケージ|ITプランニング経験/i.test(jobText);
