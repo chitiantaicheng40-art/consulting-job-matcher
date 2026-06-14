@@ -9936,3 +9936,803 @@ if (!global.__CORE_PRECISION_CONTROLS_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: profile-based matching layer =====
+// Priority B: candidateProfile / jobProfile based matching.
+// This layer reduces keyword-only false positives by classifying both candidate and job into role/product categories.
+if (!global.__PROFILE_BASED_MATCHING_LAYER_APPLIED__) {
+  global.__PROFILE_BASED_MATCHING_LAYER_APPLIED__ = true;
+
+  function __pbText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__pbText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__pbText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __pbHasAny(text, patterns) {
+    const s = String(text || "");
+    return patterns.some(p => p.test(s));
+  }
+
+  function __pbUniq(arr) {
+    return [...new Set((arr || []).filter(Boolean))];
+  }
+
+  function __pbScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __pbSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __pbUpdateRank(match) {
+    const score = __pbScore(match);
+
+    if (score >= 70) {
+      match.rank = "A";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.priority = match.priority || "高";
+    } else if (score >= 50) {
+      match.rank = "B";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.priority = match.priority || "中";
+    } else if (score >= 30) {
+      match.rank = "C";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.priority = "優先低";
+    } else {
+      match.rank = "D";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.priority = "対象外寄り";
+    }
+
+    return match;
+  }
+
+  function __pbAppendComment(match, note) {
+    if (!note) return match;
+
+    const current = match.comment || match.reason || "";
+    if (!current) {
+      match.comment = note;
+      match.reason = note;
+      return match;
+    }
+
+    if (!String(current).includes(note)) {
+      match.comment = `${current} ${note}`;
+      match.reason = match.reason ? `${match.reason} ${note}` : match.comment;
+    }
+
+    return match;
+  }
+
+  function __pbGetJob(match) {
+    return match?.job || match?.jobData || match?.originalJob || match;
+  }
+
+  function __pbGetRequiredRatio(match) {
+    const matched = [
+      ...(Array.isArray(match.matchedRequired) ? match.matchedRequired : []),
+      ...(Array.isArray(match.matchedRequiredRequirements) ? match.matchedRequiredRequirements : []),
+      ...(Array.isArray(match.matchedMust) ? match.matchedMust : []),
+      ...(Array.isArray(match.requiredMatched) ? match.requiredMatched : [])
+    ];
+
+    const missing = [
+      ...(Array.isArray(match.missingRequired) ? match.missingRequired : []),
+      ...(Array.isArray(match.missingRequiredRequirements) ? match.missingRequiredRequirements : []),
+      ...(Array.isArray(match.unmatchedRequired) ? match.unmatchedRequired : []),
+      ...(Array.isArray(match.unmatchedRequiredRequirements) ? match.unmatchedRequiredRequirements : []),
+      ...(Array.isArray(match.missingMust) ? match.missingMust : [])
+    ];
+
+    if (matched.length + missing.length > 0) {
+      return {
+        matchedCount: matched.length,
+        missingCount: missing.length,
+        totalCount: matched.length + missing.length,
+        ratio: matched.length / Math.max(1, matched.length + missing.length)
+      };
+    }
+
+    const text = __pbText(match);
+    const m = text.match(/必須一致率\s*([0-9]+)\s*%?\s*[（(]\s*([0-9]+)\s*\/\s*([0-9]+)\s*[）)]/);
+
+    if (m) {
+      const matchedCount = Number(m[2]);
+      const totalCount = Number(m[3]);
+      return {
+        matchedCount,
+        missingCount: Math.max(0, totalCount - matchedCount),
+        totalCount,
+        ratio: matchedCount / Math.max(1, totalCount)
+      };
+    }
+
+    return {
+      matchedCount: 0,
+      missingCount: 0,
+      totalCount: 0,
+      ratio: null
+    };
+  }
+
+  function __buildCandidateProfile(candidate) {
+    const text = __pbText(candidate);
+    const roleCategories = [];
+    const productLevels = {};
+    const strengths = [];
+    const negativeSignals = [];
+
+    const hasSalesforce = __pbHasAny(text, [
+      /Salesforce/i,
+      /SFDC/i,
+      /SFA/i,
+      /CRM/i,
+      /CX/i,
+      /顧客データ基盤/,
+      /顧客接点/,
+      /CRM刷新/,
+      /Salesforce Administrator/i,
+      /Platform 基礎/,
+      /Salesforce 認定/i
+    ]);
+
+    const hasSalesforceImplementation = __pbHasAny(text, [
+      /Salesforce.*選定/i,
+      /Salesforce.*要件定義/i,
+      /Salesforce.*設計/i,
+      /Salesforce.*導入/i,
+      /Salesforce.*開発/i,
+      /Salesforce.*定着化/i,
+      /Salesforce.*保守/i,
+      /CRM.*要件定義/i,
+      /CRM.*導入/i,
+      /CRM.*刷新/i
+    ]);
+
+    if (hasSalesforce) {
+      roleCategories.push("SALESFORCE_CRM");
+      strengths.push("Salesforce/CRM/CX");
+      productLevels.salesforce = hasSalesforceImplementation ? "implementation" : "usage";
+    } else {
+      productLevels.salesforce = "none";
+    }
+
+    const hasSapSpecific = __pbHasAny(text, [
+      /S\/4HANA/i,
+      /ABAP/i,
+      /Basis/i,
+      /Fiori/i,
+      /BTP/i,
+      /SAP\s*PM/i,
+      /SAP\s*MM/i,
+      /SAP\s*SD/i,
+      /SAP\s*FI/i,
+      /SAP\s*CO/i,
+      /SAP.*要件定義/i,
+      /SAP.*カットオーバー/i,
+      /SAP.*移行/i,
+      /SAP.*設計/i,
+      /SAP.*開発/i,
+      /SAP.*導入.*主導/i
+    ]);
+
+    const hasSapLight = __pbHasAny(text, [
+      /SAP/i,
+      /SAC/i,
+      /SAP Analytics Cloud/i,
+      /SAP.*定着化/i,
+      /SAP.*トレーニング/i,
+      /SAP.*説明資料/i,
+      /SAP.*利用促進/i
+    ]);
+
+    if (hasSapSpecific) {
+      roleCategories.push("SAP_SPECIALIST");
+      strengths.push("SAP specialist");
+      productLevels.sap = "implementation";
+    } else if (hasSapLight) {
+      roleCategories.push("SAP_LIGHT");
+      strengths.push("SAP/SAC adoption");
+      productLevels.sap = "adoption_or_support";
+      negativeSignals.push("SAP S/4HANA/ABAP/Basis implementation not confirmed");
+    } else {
+      productLevels.sap = "none";
+    }
+
+    const hasOracleFusion = __pbHasAny(text, [
+      /Oracle\s*Fusion/i,
+      /Oracle\s*Cloud\s*ERP/i,
+      /Oracle\s*ERP/i,
+      /Oracle\s*EPM/i,
+      /Oracle\s*EBS/i,
+      /Oracle\s*Cloud\s*Infrastructure/i,
+      /OCI/i,
+      /Oracle.*導入/i,
+      /Oracle.*要件定義/i,
+      /Oracle.*移行/i
+    ]);
+
+    const hasOracleDb = __pbHasAny(text, [
+      /Oracle/i,
+      /Oracle Database/i,
+      /SQL/i,
+      /DB/i,
+      /データベース/i
+    ]);
+
+    if (hasOracleFusion) {
+      roleCategories.push("ORACLE_ERP");
+      productLevels.oracle = "implementation";
+    } else if (hasOracleDb) {
+      productLevels.oracle = "db_usage";
+      negativeSignals.push("Oracle ERP/Fusion/OCI implementation not confirmed");
+    } else {
+      productLevels.oracle = "none";
+    }
+
+    const hasCloud = __pbHasAny(text, [
+      /AWS/i,
+      /Azure/i,
+      /GCP/i,
+      /クラウド/,
+      /EC2/i,
+      /RDS/i,
+      /S3/i,
+      /CloudWatch/i,
+      /クラウド移行/,
+      /オンプレ.*移行/i
+    ]);
+
+    if (hasCloud) {
+      roleCategories.push("CLOUD");
+      strengths.push("Cloud");
+    }
+
+    const hasDelivery = __pbHasAny(text, [
+      /SIer/i,
+      /システムインテグレーション/,
+      /要件定義/,
+      /基本設計/,
+      /詳細設計/,
+      /設計/,
+      /開発/,
+      /テスト/,
+      /運用保守/,
+      /保守開発/,
+      /API/,
+      /ETL/,
+      /データモデル/,
+      /システム要件/,
+      /業務要件/,
+      /基幹システム/,
+      /業務システム/
+    ]);
+
+    if (hasDelivery) {
+      roleCategories.push("IT_CONSULT_DELIVERY");
+      strengths.push("IT delivery");
+    }
+
+    const hasPm = __pbHasAny(text, [
+      /PM\b/i,
+      /PMO/i,
+      /プロジェクトリード/,
+      /チームリード/,
+      /リーダー/,
+      /進捗管理/,
+      /課題管理/,
+      /タスク管理/,
+      /メンバー.*管理/,
+      /合意形成/,
+      /論点整理/,
+      /プロジェクト.*推進/
+    ]);
+
+    if (hasPm) {
+      roleCategories.push("PM_PL");
+      strengths.push("PM/PL");
+    }
+
+    const hasSales = __pbHasAny(text, [
+      /法人営業/,
+      /ソリューション営業/,
+      /IT営業/,
+      /プリセールス/,
+      /アカウント営業/,
+      /アライアンス営業/,
+      /パートナー営業/,
+      /販売実績/,
+      /営業担当/,
+      /営業経験/,
+      /売上責任/,
+      /クロージング/,
+      /セリング/,
+      /sales/i,
+      /pre.?sales/i,
+      /account\s?manager/i,
+      /alliance/i
+    ]);
+
+    if (hasSales) {
+      roleCategories.push("SALES_ALLIANCE");
+      strengths.push("Sales");
+      productLevels.sales = "confirmed";
+    } else {
+      productLevels.sales = "none";
+      negativeSignals.push("sales/alliance experience not confirmed");
+    }
+
+    const hasBusinessTransformation = __pbHasAny(text, [
+      /業務改革/,
+      /DX/i,
+      /構想/,
+      /業務整理/,
+      /業務要件/,
+      /課題整理/,
+      /課題構造化/,
+      /業務フロー/,
+      /合意形成/,
+      /定着化/,
+      /チェンジマネジメント/,
+      /データ活用/,
+      /可視化/,
+      /マーケティングDX/,
+      /営業DX/
+    ]);
+
+    if (hasBusinessTransformation) {
+      roleCategories.push("BUSINESS_TRANSFORMATION");
+      strengths.push("Business transformation");
+    }
+
+    const industries = [];
+    if (__pbHasAny(text, [/化学メーカー/, /化学/])) industries.push("chemical");
+    if (__pbHasAny(text, [/住宅メーカー/, /住宅/])) industries.push("housing");
+    if (__pbHasAny(text, [/発動機/, /製造/, /メーカー/])) industries.push("manufacturing");
+    if (__pbHasAny(text, [/金融/])) industries.push("financial");
+    if (__pbHasAny(text, [/小売/])) industries.push("retail");
+    if (__pbHasAny(text, [/物流/])) industries.push("logistics");
+
+    const education = {};
+    if (__pbHasAny(text, [/大学.*卒業/, /大学.*卒/, /明治大学/, /早稲田大学/, /慶應/, /東京大学/, /京都大学/, /大学院/, /修士/])) {
+      education.hasDegree = true;
+      education.level = __pbHasAny(text, [/大学院/, /修士/, /Master/i]) ? "graduate" : "bachelor";
+    } else {
+      education.hasDegree = false;
+      education.level = "unknown";
+    }
+
+    const location = {};
+    if (__pbHasAny(text, [/希望勤務地|勤務地希望|現住所|居住地|在住|東京都|大阪府|愛知県|福岡県|首都圏|関東|関西|全国可|リモート希望/])) {
+      location.isKnown = true;
+    } else {
+      location.isKnown = false;
+      negativeSignals.push("candidate location not confirmed");
+    }
+
+    let primaryRole = "UNKNOWN";
+    if (roleCategories.includes("SALESFORCE_CRM")) primaryRole = "Salesforce/CRM/CX Consultant";
+    else if (roleCategories.includes("SAP_SPECIALIST")) primaryRole = "SAP Consultant";
+    else if (roleCategories.includes("ORACLE_ERP")) primaryRole = "Oracle ERP Consultant";
+    else if (roleCategories.includes("CLOUD") && roleCategories.includes("PM_PL")) primaryRole = "Cloud/IT Project Lead";
+    else if (roleCategories.includes("IT_CONSULT_DELIVERY")) primaryRole = "IT Consultant / System Delivery";
+    else if (roleCategories.includes("SALES_ALLIANCE")) primaryRole = "Sales / Alliance";
+
+    return {
+      primaryRole,
+      roleCategories: __pbUniq(roleCategories),
+      productLevels,
+      strengths: __pbUniq(strengths),
+      negativeSignals: __pbUniq(negativeSignals),
+      industries: __pbUniq(industries),
+      education,
+      location
+    };
+  }
+
+  function __buildJobProfile(job) {
+    const text = __pbText(job);
+    const roleCategories = [];
+    const coreMust = [];
+    const productRequirements = {};
+    const riskIfMissing = [];
+
+    const isSalesforceCrm = __pbHasAny(text, [
+      /Salesforce/i,
+      /SFDC/i,
+      /CRM/i,
+      /CX/i,
+      /SFA/i,
+      /Customer/i,
+      /顧客接点/,
+      /顧客データ/,
+      /営業DX/,
+      /マーケティングDX/,
+      /CRM刷新/,
+      /Customer Transformation/i
+    ]);
+
+    if (isSalesforceCrm) {
+      roleCategories.push("SALESFORCE_CRM");
+      coreMust.push("Salesforce/CRM/CX experience");
+      productRequirements.salesforce = "implementation_or_consulting";
+    }
+
+    const isSap = __pbHasAny(text, [
+      /SAP/i,
+      /S\/4HANA/i,
+      /ABAP/i,
+      /Basis/i,
+      /Fiori/i,
+      /BTP/i,
+      /SAP PM/i,
+      /SAP MM/i,
+      /SAP SD/i,
+      /SAP FI/i,
+      /SAP CO/i,
+      /SAPコンサル/i
+    ]);
+
+    if (isSap) {
+      roleCategories.push("SAP_SPECIALIST");
+      coreMust.push("SAP implementation / module / technical experience");
+      productRequirements.sap = "implementation";
+      riskIfMissing.push("SAP implementation experience");
+    }
+
+    const isOracle = __pbHasAny(text, [
+      /Oracle\s*Fusion/i,
+      /Fusion\s*Cloud/i,
+      /Oracle\s*Cloud\s*ERP/i,
+      /Oracle\s*ERP/i,
+      /Oracle\s*EPM/i,
+      /Oracle\s*SCM/i,
+      /Oracle\s*HCM/i,
+      /Oracle\s*EBS/i,
+      /E-Business Suite/i,
+      /Oracle\s*Cloud\s*Infrastructure/i,
+      /OCI/i,
+      /Oracle領域/,
+      /Enterprise Transformation.*Oracle/i
+    ]);
+
+    if (isOracle) {
+      roleCategories.push("ORACLE_ERP");
+      coreMust.push("Oracle Fusion / ERP / EPM / OCI implementation");
+      productRequirements.oracle = "implementation";
+      riskIfMissing.push("Oracle ERP/Fusion/OCI implementation experience");
+    }
+
+    const isCloud = __pbHasAny(text, [
+      /AWS/i,
+      /Azure/i,
+      /GCP/i,
+      /クラウド/,
+      /Cloud/i,
+      /インフラ/,
+      /移行/,
+      /モダナイゼーション/
+    ]);
+
+    if (isCloud) {
+      roleCategories.push("CLOUD");
+      coreMust.push("cloud / infrastructure experience");
+    }
+
+    const isPmoPm = __pbHasAny(text, [
+      /PMO/i,
+      /PM\b/i,
+      /プロジェクトマネジメント/,
+      /プロジェクトリード/,
+      /チームリード/,
+      /進捗管理/,
+      /課題管理/,
+      /計画策定/
+    ]);
+
+    if (isPmoPm) {
+      roleCategories.push("PM_PL");
+      coreMust.push("project management / PMO experience");
+    }
+
+    const isSalesAlliance = __pbHasAny(text, [
+      /営業/,
+      /セールス/,
+      /アライアンス/,
+      /アカウント/,
+      /Sales/i,
+      /Alliance/i,
+      /Account/i,
+      /販売実績/,
+      /提案営業/,
+      /パートナー営業/,
+      /セリング/,
+      /クロージング/,
+      /売上/,
+      /GTM/i,
+      /Go.?to.?Market/i
+    ]);
+
+    if (isSalesAlliance) {
+      roleCategories.push("SALES_ALLIANCE");
+      coreMust.push("solution sales / alliance / account management experience");
+      productRequirements.sales = "confirmed";
+      riskIfMissing.push("sales/alliance experience");
+    }
+
+    const isItDelivery = __pbHasAny(text, [
+      /ITコンサル/,
+      /テクノロジーコンサル/,
+      /システム導入/,
+      /業務システム/,
+      /基幹システム/,
+      /要件定義/,
+      /設計/,
+      /開発/,
+      /テスト/,
+      /運用/,
+      /DX/i
+    ]);
+
+    if (isItDelivery) {
+      roleCategories.push("IT_CONSULT_DELIVERY");
+      coreMust.push("IT delivery / requirements definition experience");
+    }
+
+    const isBusinessTransformation = __pbHasAny(text, [
+      /業務改革/,
+      /BPR/i,
+      /DX/i,
+      /構想策定/,
+      /業務整理/,
+      /業務要件/,
+      /チェンジマネジメント/,
+      /データ活用/,
+      /可視化/,
+      /営業改革/,
+      /マーケティング改革/
+    ]);
+
+    if (isBusinessTransformation) {
+      roleCategories.push("BUSINESS_TRANSFORMATION");
+      coreMust.push("business transformation experience");
+    }
+
+    let primaryRoleCategory = "GENERAL";
+    if (roleCategories.includes("SALES_ALLIANCE")) primaryRoleCategory = "SALES_ALLIANCE";
+    else if (roleCategories.includes("SALESFORCE_CRM")) primaryRoleCategory = "SALESFORCE_CRM";
+    else if (roleCategories.includes("SAP_SPECIALIST")) primaryRoleCategory = "SAP_SPECIALIST";
+    else if (roleCategories.includes("ORACLE_ERP")) primaryRoleCategory = "ORACLE_ERP";
+    else if (roleCategories.includes("CLOUD")) primaryRoleCategory = "CLOUD";
+    else if (roleCategories.includes("PM_PL")) primaryRoleCategory = "PM_PL";
+    else if (roleCategories.includes("IT_CONSULT_DELIVERY")) primaryRoleCategory = "IT_CONSULT_DELIVERY";
+    else if (roleCategories.includes("BUSINESS_TRANSFORMATION")) primaryRoleCategory = "BUSINESS_TRANSFORMATION";
+
+    return {
+      primaryRoleCategory,
+      roleCategories: __pbUniq(roleCategories),
+      coreMust: __pbUniq(coreMust),
+      productRequirements,
+      riskIfMissing: __pbUniq(riskIfMissing)
+    };
+  }
+
+  function __profileCompatibility(candidateProfile, jobProfile) {
+    const cRoles = candidateProfile.roleCategories || [];
+    const jRoles = jobProfile.roleCategories || [];
+
+    const overlap = jRoles.filter(r => cRoles.includes(r));
+    let bonus = 0;
+    let penalty = 0;
+    let cap = 100;
+    const notes = [];
+
+    if (overlap.length > 0) {
+      bonus += Math.min(20, overlap.length * 8);
+      notes.push(`職種カテゴリ一致：${overlap.join(" / ")}`);
+    }
+
+    // Strong mismatch controls
+    if (jobProfile.primaryRoleCategory === "SALES_ALLIANCE" && !cRoles.includes("SALES_ALLIANCE")) {
+      penalty += 30;
+      cap = Math.min(cap, 29);
+      notes.push("営業/アライアンス求人ですが、候補者に営業/アライアンス経験が確認できないため上限を制限しました。");
+    }
+
+    if (jobProfile.primaryRoleCategory === "SAP_SPECIALIST") {
+      const sapLevel = candidateProfile.productLevels?.sap || "none";
+      if (sapLevel === "none") {
+        penalty += 35;
+        cap = Math.min(cap, 45);
+        notes.push("SAP専門求人ですが、候補者にSAP経験が確認できないため大幅減点しました。");
+      } else if (sapLevel === "adoption_or_support") {
+        penalty += 25;
+        cap = Math.min(cap, 65);
+        notes.push("SAP/SAC定着化・支援経験はありますが、SAP導入/開発/モジュール専門経験とは区別して減点しました。");
+      }
+    }
+
+    if (jobProfile.primaryRoleCategory === "ORACLE_ERP") {
+      const oracleLevel = candidateProfile.productLevels?.oracle || "none";
+      if (oracleLevel !== "implementation") {
+        penalty += 35;
+        cap = Math.min(cap, 45);
+        notes.push("Oracle ERP/Fusion/OCI求人ですが、候補者に該当製品の導入経験が確認できないため大幅減点しました。");
+      }
+    }
+
+    if (jobProfile.primaryRoleCategory === "SALESFORCE_CRM") {
+      const sfLevel = candidateProfile.productLevels?.salesforce || "none";
+      if (sfLevel === "implementation") {
+        bonus += 20;
+        notes.push("Salesforce/CRM導入経験が求人カテゴリと強く一致しています。");
+      } else if (sfLevel === "usage") {
+        bonus += 8;
+        notes.push("Salesforce/CRM経験が一部一致しています。");
+      } else {
+        penalty += 20;
+        cap = Math.min(cap, 65);
+        notes.push("Salesforce/CRM求人ですが、候補者にSalesforce/CRM経験が確認できないため減点しました。");
+      }
+    }
+
+    if (
+      ["IT_CONSULT_DELIVERY", "CLOUD", "PM_PL", "BUSINESS_TRANSFORMATION"].includes(jobProfile.primaryRoleCategory) &&
+      (
+        cRoles.includes("IT_CONSULT_DELIVERY") ||
+        cRoles.includes("CLOUD") ||
+        cRoles.includes("PM_PL") ||
+        cRoles.includes("BUSINESS_TRANSFORMATION")
+      )
+    ) {
+      bonus += 10;
+      notes.push("ITデリバリー/PM/業務変革領域の親和性を加点しました。");
+    }
+
+    return {
+      bonus,
+      penalty,
+      cap,
+      overlap,
+      notes
+    };
+  }
+
+  // Candidate profile generation wrapper
+  if (typeof analyzeResumeWithVision === "function" && !global.__PB_CANDIDATE_PROFILE_PATCH_APPLIED__) {
+    global.__PB_CANDIDATE_PROFILE_PATCH_APPLIED__ = true;
+
+    const __prevAnalyzeResumeWithVision_pb = analyzeResumeWithVision;
+
+    analyzeResumeWithVision = async function analyzeResumeWithProfile(buffer) {
+      const candidate = await __prevAnalyzeResumeWithVision_pb(buffer);
+
+      candidate.candidateProfile = __buildCandidateProfile(candidate);
+
+      if (!candidate.primaryRole || candidate.primaryRole === "候補者" || candidate.primaryRole === "UNKNOWN") {
+        candidate.primaryRole = candidate.candidateProfile.primaryRole;
+      }
+
+      candidate.roleCategories = candidate.roleCategories || candidate.candidateProfile.roleCategories;
+      candidate.negativeSignals = candidate.negativeSignals || candidate.candidateProfile.negativeSignals;
+
+      console.log("===== candidateProfile generated =====");
+      console.log(candidate.candidateProfile);
+
+      return candidate;
+    };
+  }
+
+  // BuildMatches profile-based reranking wrapper
+  if (typeof buildMatches === "function" && !global.__PB_BUILD_MATCHES_PATCH_APPLIED__) {
+    global.__PB_BUILD_MATCHES_PATCH_APPLIED__ = true;
+
+    const __prevBuildMatches_pb = buildMatches;
+
+    buildMatches = function buildMatchesWithProfiles(candidate, jobs) {
+      const candidateProfile = candidate.candidateProfile || __buildCandidateProfile(candidate);
+
+      const matches = __prevBuildMatches_pb(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      const adjusted = matches.map(match => {
+        const job = __pbGetJob(match);
+        const jobProfile = job.jobProfile || __buildJobProfile(job);
+
+        job.jobProfile = jobProfile;
+        match.jobProfile = jobProfile;
+        match.candidateProfile = candidateProfile;
+
+        const compatibility = __profileCompatibility(candidateProfile, jobProfile);
+
+        let score = __pbScore(match);
+        let cap = compatibility.cap;
+        let penalty = compatibility.penalty;
+        let bonus = compatibility.bonus;
+        const notes = [...compatibility.notes];
+
+        const ratio = __pbGetRequiredRatio(match);
+
+        if (ratio.ratio !== null) {
+          if (ratio.ratio < 0.30) {
+            cap = Math.min(cap, 50);
+            notes.push("必須一致率が30%未満のため、上限50点に制限しました。");
+          } else if (ratio.ratio < 0.50) {
+            cap = Math.min(cap, 65);
+            notes.push("必須一致率が50%未満のため、上限65点に制限しました。");
+          } else if (ratio.ratio < 0.70) {
+            cap = Math.min(cap, 80);
+            notes.push("必須一致率が70%未満のため、上限80点に制限しました。");
+          }
+        }
+
+        if (ratio.missingCount >= 8) {
+          cap = Math.min(cap, 65);
+          notes.push("不足必須が8件以上のため、上限65点に制限しました。");
+        } else if (ratio.missingCount >= 5) {
+          cap = Math.min(cap, 75);
+          notes.push("不足必須が5件以上のため、上限75点に制限しました。");
+        }
+
+        score = Math.min(cap, score - penalty + bonus);
+
+        __pbSetScore(match, score);
+        __pbUpdateRank(match);
+
+        match.profileBasedAdjustment = {
+          applied: true,
+          originalProfileCategories: candidateProfile.roleCategories,
+          jobProfileCategories: jobProfile.roleCategories,
+          primaryJobCategory: jobProfile.primaryRoleCategory,
+          overlap: compatibility.overlap,
+          bonus,
+          penalty,
+          cap,
+          requiredRatio: ratio.ratio,
+          missingCount: ratio.missingCount,
+          notes
+        };
+
+        if (notes.length > 0) {
+          __pbAppendComment(match, `構造化判定：${notes.join(" ")}`);
+        }
+
+        return match;
+      });
+
+      adjusted.sort((a, b) => __pbScore(b) - __pbScore(a));
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Profile-based matching layer applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
