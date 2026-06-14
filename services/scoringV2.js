@@ -110,8 +110,30 @@ function candidateText(candidate) {
 }
 
 function candidateYears(candidate) {
-  const n = Number(candidate?.yearsExperience || candidate?.candidateProfileV2?.yearsExperience || candidate?.aiCandidateProfile?.yearsExperience || candidate?.candidateProfile?.yearsExperience || 0);
-  return Number.isFinite(n) ? n : 0;
+  const direct = Number(candidate?.yearsExperience || candidate?.candidateProfileV2?.yearsExperience || candidate?.aiCandidateProfile?.yearsExperience || candidate?.candidateProfile?.yearsExperience || 0);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const t = candidateText(candidate);
+
+  // Common resume phrasing: 2023年4月～現在 / 2021年10月～現在
+  const m = t.match(/(20\d{2})年\s*(\d{1,2})月\s*[～〜\-－―]\s*現在/);
+  if (m) {
+    const startY = Number(m[1]);
+    const startM = Number(m[2]);
+    // Conservative current date assumption for scoring. Exact month is not critical.
+    const nowY = new Date().getFullYear();
+    const nowM = new Date().getMonth() + 1;
+    const months = (nowY - startY) * 12 + (nowM - startM);
+    return Math.max(0, Math.round((months / 12) * 10) / 10);
+  }
+
+  const y = t.match(/([0-9０-９]+)\s*年以上/);
+  if (y) {
+    const n = Number(String(y[1]).replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)));
+    if (Number.isFinite(n)) return n;
+  }
+
+  return 0;
 }
 
 function matchRequirement(req, ctx) {
@@ -285,6 +307,35 @@ function scoreJob(candidate, job, cachedProfile) {
     else score -= 6;
   }
 
+  // Positive fit for general Java/Web application engineers.
+  const isJavaWebCandidate =
+    has(cText, "Java") &&
+    (has(cText, "JavaScript|React|Spring|Oracle|MySQL") || cCats.has("SOFTWARE_ENGINEER"));
+
+  const isJavaWebJob =
+    has(jobText, "Java|JavaScript|React|Spring|Webアプリ|WebやMobileアプリケーション|オープン系開発言語|システム設計・開発|システム開発");
+
+  const isBankingOrFinancialJob =
+    has(jobText, "銀行|バンキング|金融|決済|勘定系|インターネットバンキング");
+
+  const isModernizationJob =
+    has(jobText, "AMO|モダナイゼーション|レガシーシステム刷新|現行システム|アプリケーションモダナイゼーション");
+
+  if (isJavaWebCandidate && isJavaWebJob) {
+    score += 16;
+    notes.push("Java/Webアプリ開発経験との親和性あり");
+  }
+
+  if (isJavaWebCandidate && isBankingOrFinancialJob) {
+    score += 8;
+    notes.push("金融/バンキングシステム経験との親和性あり");
+  }
+
+  if (isJavaWebCandidate && isModernizationJob) {
+    score += 8;
+    notes.push("既存システム更改/モダナイゼーションとの親和性あり");
+  }
+
   // Negative / hard mismatch caps
   let cap = 100;
 
@@ -331,6 +382,20 @@ function scoreJob(candidate, job, cachedProfile) {
   if (has(jobText, "100名以上|PMP|PMBOK|大規模PM|プログラム・プロジェクト・サービスマネジメント")) {
     cap = Math.min(cap, 42);
     notes.push("大規模PM要件が強いため上限42");
+  }
+
+  // Senior manager / manager class caps.
+  const isSeniorManagerJob = has(jobText, "シニアマネジャー|シニアマネージャー|マネジャー|マネージャー|Manager");
+  const hasManagerExperience = cCats.has("PM_PL") || cCats.has("PMO") || has(cText, "プロジェクトマネージャー|プロジェクトリーダー|チームリード|マネジメント経験|管理経験");
+  if (isSeniorManagerJob && (!hasManagerExperience || years < 5)) {
+    cap = Math.min(cap, 30);
+    notes.push("マネジャー/シニアマネジャー求人だが候補者の管理経験・年数が不足");
+  }
+
+  // Industry-specific senior consultant caps.
+  if (has(jobText, "食品飲料|消費財|小売|流通|製造業|素材|エネルギー") && !has(cText, "食品飲料|消費財|小売|流通|製造業|素材|エネルギー")) {
+    cap = Math.min(cap, 42);
+    notes.push("特定業界知見求人だが候補者に該当業界経験なし");
   }
 
   // Domain / product-specific mismatch caps.
@@ -386,7 +451,7 @@ function scoreJob(candidate, job, cachedProfile) {
   score = Math.max(0, Math.min(100, score, cap));
   score = Math.round(score);
 
-  const preferredMatched = preferred.filter(p => matchRequirement(p, ctx)).slice(0, 5);
+  const preferredMatched = preferred.filter(p => matchRequirement(p, ctx) && !/PMBOK|PMP|100名以上|マネジャー|マネージャー/i.test(p)).slice(0, 5);
 
   return {
     company: getCompany(job, profile),
