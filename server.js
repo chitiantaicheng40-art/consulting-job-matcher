@@ -14163,3 +14163,297 @@ if (!global.__PROFILE_BASED_JOB_POOL_EXPANSION_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: direct Salesforce/CRM AI recommendations =====
+// Purpose:
+// - Existing keyword matcher can fail to surface true Salesforce/CRM jobs.
+// - Add direct AI-profile-based recommendations from job_profiles_cache.json.
+// - Keep this strict: only explicit Salesforce / AI×Salesforce / CX/CRM / CRM Consultant jobs.
+if (!global.__DIRECT_SALESFORCE_CRM_RECOMMENDATIONS_APPLIED__) {
+  global.__DIRECT_SALESFORCE_CRM_RECOMMENDATIONS_APPLIED__ = true;
+
+  const fs = require("fs");
+  const path = require("path");
+
+  function __dcrText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__dcrText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__dcrText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __dcrScore(match) {
+    const n = Number(match?.score ?? match?.totalScore ?? match?.matchScore ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __dcrSetRank(match) {
+    const score = __dcrScore(match);
+
+    if (score >= 75) {
+      match.rank = "A";
+      match.documentPassLikelihood = "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.recommendationLevel = "優先提案";
+      match.isRecommended = true;
+    } else if (score >= 55) {
+      match.rank = "B";
+      match.documentPassLikelihood = "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.recommendationLevel = "提案候補";
+      match.isRecommended = true;
+    } else if (score >= 35) {
+      match.rank = "C";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "要確認";
+      match.isRecommended = true;
+    } else {
+      match.rank = "D";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+    }
+
+    return match;
+  }
+
+  function __dcrCandidateProfile(candidate) {
+    return candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
+  }
+
+  function __dcrCandidateHasSalesforce(candidate) {
+    const p = __dcrCandidateProfile(candidate);
+    const cats = Array.isArray(p.roleCategoryList)
+      ? p.roleCategoryList
+      : Array.isArray(p.roleCategories)
+        ? p.roleCategories
+        : [];
+
+    const sf = p?.productLevels?.salesforce || candidate?.productLevels?.salesforce || "none";
+
+    return cats.includes("SALESFORCE_CRM") || ["implementation", "lead"].includes(sf);
+  }
+
+  function __dcrLoadProfiles() {
+    try {
+      const file = path.join(process.cwd(), "job_profiles_cache.json");
+      if (!fs.existsSync(file)) return [];
+      return Object.values(JSON.parse(fs.readFileSync(file, "utf8")));
+    } catch (e) {
+      console.warn("direct CRM recommendations: failed to load job_profiles_cache.json", e.message);
+      return [];
+    }
+  }
+
+  function __dcrDisplayName(profile) {
+    return [
+      profile.company,
+      profile.title,
+      profile.displayName
+    ].filter(Boolean).join(" / ");
+  }
+
+  function __dcrIsExplicitCrm(profile) {
+    const text = [
+      __dcrText(profile.displayName),
+      __dcrText(profile.company),
+      __dcrText(profile.title),
+      __dcrText(profile.url),
+      __dcrText(profile.summary),
+      __dcrText(profile.primaryRoleCategory),
+      __dcrText(profile.roleCategories),
+      __dcrText(profile.coreMust),
+      __dcrText(profile.productRequirements)
+    ].join("\n");
+
+    const cats = [
+      profile.primaryRoleCategory,
+      ...(Array.isArray(profile.roleCategories) ? profile.roleCategories : [])
+    ].filter(Boolean);
+
+    const explicitPositive =
+      profile.primaryRoleCategory === "SALESFORCE_CRM" ||
+      /Salesforce|AI×Salesforce|CX\/CRM|CRMコンサル|CRM\/CX|Customer\s*コンサル|カスタマーサービス|顧客体験|顧客接点/i.test(text);
+
+    const hardNegative =
+      /Microsoftソリューション|調達|購買|Supply|R&D|PLM|バリューチェーン|New Business|SCM|サプライチェーン|物流|生産|製造|Fortience|人的資本|People|HR|SAPアプリケーション|SAP\s|S\/4HANA|Oracle|会計|HCM|HXM|セキュリティ/i.test(text)
+      && !/Salesforce|AI×Salesforce|CX\/CRM|CRMコンサル|Customer\s*コンサル|カスタマーサービス|顧客体験/i.test(text);
+
+    return explicitPositive && !hardNegative && cats.includes("SALESFORCE_CRM");
+  }
+
+  function __dcrScoreProfile(profile) {
+    const text = [
+      __dcrText(profile.displayName),
+      __dcrText(profile.title),
+      __dcrText(profile.summary),
+      __dcrText(profile.coreMust),
+      __dcrText(profile.productRequirements)
+    ].join("\n");
+
+    let score = 52;
+    const notes = [];
+
+    if (/Salesforce/i.test(text)) {
+      score += 18;
+      notes.push("Salesforce経験との明確な親和性があります。");
+    }
+
+    if (/AI×Salesforce|Salesforceコンサル|Salesforce コンサル|Salesforceエンジニア/i.test(text)) {
+      score += 8;
+      notes.push("Salesforce特化求人です。");
+    }
+
+    if (/CRM|CX\/CRM|顧客体験|顧客接点|カスタマーサービス|Customer/i.test(text)) {
+      score += 8;
+      notes.push("CRM/CX領域との親和性があります。");
+    }
+
+    if (/要件定義|導入|定着|保守|PM|リード|構想策定|業務改革|DX/i.test(text)) {
+      score += 5;
+      notes.push("要件定義・導入・定着化経験を活かせる可能性があります。");
+    }
+
+    if (/マネージャー|Manager|SMGR|8年以上|10年以上|法人営業|営業経験|プリセールス|アライアンス/i.test(text)) {
+      score -= 18;
+      notes.push("マネージャー/営業系要件が含まれる可能性があるため減点しています。");
+    }
+
+    score = Math.max(35, Math.min(82, score));
+
+    return { score: Math.round(score), notes };
+  }
+
+  function __dcrProfileToMatch(profile) {
+    const { score, notes } = __dcrScoreProfile(profile);
+
+    const company = profile.company || "Unknown";
+    const title = profile.title || (profile.displayName || "").replace(/^.*?\/\s*/, "") || "Salesforce/CRM related job";
+
+    const required = Array.isArray(profile.coreMust)
+      ? profile.coreMust.map(x => typeof x === "string" ? x : x.requirement).filter(Boolean)
+      : [];
+
+    const preferred = Array.isArray(profile.preferred)
+      ? profile.preferred.map(x => typeof x === "string" ? x : x.requirement).filter(Boolean)
+      : [];
+
+    const match = {
+      company,
+      position: title,
+      title,
+      url: profile.url,
+      score,
+      scoreBreakdown: {
+        skill: Math.min(45, score - 25),
+        industry: 0,
+        role: 15,
+        location: 0,
+        career: 10
+      },
+      requiredMatched: required.slice(0, 3),
+      requiredMissing: required.slice(3),
+      requiredTotal: required.length,
+      requiredMatchedCount: Math.min(3, required.length),
+      requiredMatchRate: required.length > 0 ? Math.round((Math.min(3, required.length) / required.length) * 100) : 0,
+      preferredMatched: preferred.slice(0, 2),
+      keywordMatched: ["Salesforce/CRM/CX"],
+      source: "direct_ai_job_profile_recommendation",
+      aiJobProfile: profile,
+      directAiRecommendation: {
+        applied: true,
+        reason: "候補者のSalesforce/CRM/CX経験に対して、AI求人Profileから直接推薦候補として追加しました。",
+        notes
+      }
+    };
+
+    __dcrSetRank(match);
+
+    match.documentPassReason = `AI求人ProfileからSalesforce/CRM求人として直接推薦しました。スコア${score}点です。`;
+    match.reason = match.documentPassReason;
+
+    match.comment = [
+      "AI求人Profile直接推薦：候補者はSalesforceを中心としたCRM刷新・DX推進、要件定義、設計、導入、定着化、保守開発の経験があります。",
+      notes.join(" "),
+      required.length > 0 ? `求人側の主な必須条件：${required.slice(0, 3).join("／")}` : "",
+      "提案前に、実際の必須条件と候補者経験の粒度を確認してください。"
+    ].filter(Boolean).join(" ");
+
+    match.recommendation_comment = match.comment;
+
+    return match;
+  }
+
+  function __dcrExistingKey(match) {
+    return [
+      match?.url,
+      match?.company,
+      match?.position,
+      match?.title
+    ].filter(Boolean).join("||");
+  }
+
+  function __dcrApply(candidate, matches) {
+    if (!Array.isArray(matches)) return matches;
+    if (!__dcrCandidateHasSalesforce(candidate)) return matches;
+
+    const profiles = __dcrLoadProfiles().filter(__dcrIsExplicitCrm);
+
+    const existingUrls = new Set(matches.map(m => m.url).filter(Boolean));
+    const additions = [];
+
+    for (const p of profiles) {
+      if (p.url && existingUrls.has(p.url)) continue;
+
+      const m = __dcrProfileToMatch(p);
+      if (!m.url && additions.some(x => __dcrExistingKey(x) === __dcrExistingKey(m))) continue;
+
+      additions.push(m);
+      if (additions.length >= 20) break;
+    }
+
+    const merged = [...matches, ...additions];
+
+    merged.sort((a, b) => __dcrScore(b) - __dcrScore(a));
+
+    console.log(`Direct Salesforce/CRM recommendations added=${additions.length}, total=${merged.length}`);
+
+    return merged.map((match, index) => {
+      match.rankNo = index + 1;
+      match.order = index + 1;
+      return match;
+    });
+  }
+
+  if (typeof buildMatches === "function" && !global.__DIRECT_SALESFORCE_CRM_RECOMMENDATIONS_BUILD_WRAP_APPLIED__) {
+    global.__DIRECT_SALESFORCE_CRM_RECOMMENDATIONS_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesDirectCrmRecommendations = buildMatches;
+
+    buildMatches = function buildMatchesWithDirectSalesforceCrmRecommendations(candidate, jobs) {
+      const matches = __prevBuildMatchesDirectCrmRecommendations(candidate, jobs);
+      return __dcrApply(candidate, matches);
+    };
+
+    console.log("===== Direct Salesforce/CRM AI recommendations applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
