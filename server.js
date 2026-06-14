@@ -13419,3 +13419,313 @@ if (!global.__SYNC_LEGACY_DISPLAY_FIELDS_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: recover Salesforce/CRM matches from false Sales cap =====
+// Purpose:
+// - "Salesforce" contains "Sales"; earlier sales/alliance cap can falsely cap CRM jobs to 20.
+// - Recover true Salesforce/CRM jobs when candidate has Salesforce implementation experience.
+// - Do NOT recover jobs that require SAP specialist, Oracle ERP, or real sales/alliance experience.
+if (!global.__SALESFORCE_CRM_RECOVERY_APPLIED__) {
+  global.__SALESFORCE_CRM_RECOVERY_APPLIED__ = true;
+
+  function __sfrText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__sfrText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__sfrText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __sfrScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __sfrSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __sfrRank(match) {
+    const score = __sfrScore(match);
+
+    if (score >= 75) {
+      match.rank = "A";
+      match.documentPassLikelihood = "高";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+      match.documentPassProbability = "高";
+      match.recommendationLevel = "優先提案";
+      match.isRecommended = true;
+    } else if (score >= 55) {
+      match.rank = "B";
+      match.documentPassLikelihood = "中";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+      match.documentPassProbability = "中";
+      match.recommendationLevel = "提案候補";
+      match.isRecommended = true;
+    } else if (score >= 35) {
+      match.rank = "C";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "要確認";
+      match.isRecommended = true;
+    } else {
+      match.rank = "D";
+      match.documentPassLikelihood = "低";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+      match.documentPassProbability = "低";
+      match.recommendationLevel = "参考・低一致";
+      match.isRecommended = false;
+    }
+
+    return match;
+  }
+
+  function __sfrCandidateProfile(candidate) {
+    return candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
+  }
+
+  function __sfrCandidateHasSalesforce(candidate) {
+    const p = __sfrCandidateProfile(candidate);
+    const cats = Array.isArray(p.roleCategoryList)
+      ? p.roleCategoryList
+      : Array.isArray(p.roleCategories)
+        ? p.roleCategories
+        : [];
+
+    const sfLevel = p?.productLevels?.salesforce || candidate?.productLevels?.salesforce || "none";
+
+    return cats.includes("SALESFORCE_CRM") || ["implementation", "lead"].includes(sfLevel);
+  }
+
+  function __sfrJobProfile(match) {
+    return match?.aiJobProfile || match?.jobProfile || {};
+  }
+
+  function __sfrJobCategories(match) {
+    const jp = __sfrJobProfile(match);
+    const cats = [];
+
+    if (jp.primaryRoleCategory) cats.push(jp.primaryRoleCategory);
+    if (Array.isArray(jp.roleCategories)) cats.push(...jp.roleCategories);
+    if (Array.isArray(match?.aiPrimaryScoring?.jobCategories)) cats.push(...match.aiPrimaryScoring.jobCategories);
+    if (Array.isArray(match?.profileBasedAdjustment?.jobProfileCategories)) cats.push(...match.profileBasedAdjustment.jobProfileCategories);
+
+    return [...new Set(cats.filter(Boolean))];
+  }
+
+  function __sfrJobText(match) {
+    return [
+      __sfrText(match.company),
+      __sfrText(match.position),
+      __sfrText(match.title),
+      __sfrText(match.jobTitle),
+      __sfrText(match.url),
+      __sfrText(match.aiJobProfile),
+      __sfrText(match.jobProfile),
+      __sfrText(match.requiredMatched),
+      __sfrText(match.requiredMissing),
+      __sfrText(match.jobRequiredEvidence)
+    ].join("\n");
+  }
+
+  function __sfrIsSalesforceCrmJob(match) {
+    const cats = __sfrJobCategories(match);
+    const text = __sfrJobText(match);
+
+    return cats.includes("SALESFORCE_CRM") || /Salesforce|CRM|CX|Customer|カスタマー|顧客接点|顧客管理|顧客体験/i.test(text);
+  }
+
+  function __sfrHasHardMissingSpecialty(match) {
+    const cats = __sfrJobCategories(match);
+    const text = __sfrJobText(match);
+
+    const hasSap = cats.includes("SAP_SPECIALIST") || /SAP|S\/4HANA|SAP\s*(PP|MM|SD|FI|CO|PM|PLM|DM|EWM|Ariba|SuccessFactors)|ABAP|Basis|Fiori|BTP/i.test(text);
+    const hasOracle = cats.includes("ORACLE_ERP") || /Oracle\s*Fusion|Oracle\s*Cloud\s*ERP|Oracle\s*ERP|Oracle\s*EPM|Oracle\s*SCM|Oracle\s*HCM|Oracle\s*EBS|OCI/i.test(text);
+
+    // Real sales/alliance wording. Do NOT treat "Salesforce" or "Sales Cloud" alone as sales experience.
+    const textWithoutSalesforce = text
+      .replace(/Salesforce/gi, "")
+      .replace(/Sales\s*Cloud/gi, "")
+      .replace(/Service\s*Cloud/gi, "");
+
+    const hasRealSales = cats.includes("SALES_ALLIANCE") || /法人営業|ソリューション営業|アライアンス|アカウント営業|パートナー営業|プリセールス|営業経験|営業実績|売上責任|販売実績|提案営業|新規開拓|既存深耕/i.test(textWithoutSalesforce);
+
+    return {
+      hasSap,
+      hasOracle,
+      hasRealSales
+    };
+  }
+
+  function __sfrRequiredInfo(match) {
+    const matched = Array.isArray(match.requiredMatched) ? match.requiredMatched.length : 0;
+    const missing = Array.isArray(match.requiredMissing) ? match.requiredMissing.length : 0;
+    const total = Number(match.requiredTotal || matched + missing || 0);
+
+    if (total > 0) {
+      return {
+        matched,
+        missing: Math.max(0, total - matched),
+        total,
+        ratio: matched / Math.max(1, total)
+      };
+    }
+
+    const text = [__sfrText(match.documentPassReason), __sfrText(match.reason)].join("\n");
+    const m = text.match(/必須一致率\s*([0-9]+)\s*%?\s*[（(]\s*([0-9]+)\s*\/\s*([0-9]+)\s*[）)]/);
+    if (m) {
+      const matchedCount = Number(m[2]);
+      const totalCount = Number(m[3]);
+      return {
+        matched: matchedCount,
+        missing: Math.max(0, totalCount - matchedCount),
+        total: totalCount,
+        ratio: matchedCount / Math.max(1, totalCount)
+      };
+    }
+
+    return {
+      matched: 0,
+      missing: 0,
+      total: 0,
+      ratio: 0
+    };
+  }
+
+  function __sfrRecoveryScore(match) {
+    const req = __sfrRequiredInfo(match);
+    const aiScore = Number(match?.aiPrimaryScoring?.finalScore || match?.aiPrimaryScoring?.aiScore || 0);
+
+    let score = 45;
+
+    if (Number.isFinite(aiScore) && aiScore > 0) {
+      score = Math.min(82, aiScore);
+    }
+
+    if (req.ratio >= 0.75) score = Math.max(score, 72);
+    else if (req.ratio >= 0.50) score = Math.max(score, 58);
+    else if (req.ratio >= 0.30) score = Math.max(score, 45);
+    else score = Math.min(score, 34);
+
+    if (req.missing >= 5) score = Math.min(score, 55);
+    if (req.missing >= 8) score = Math.min(score, 45);
+
+    return Math.round(score);
+  }
+
+  function __sfrApply(match, candidate) {
+    const before = __sfrScore(match);
+
+    if (before >= 35) return match;
+    if (!__sfrCandidateHasSalesforce(candidate)) return match;
+    if (!__sfrIsSalesforceCrmJob(match)) return match;
+
+    const hard = __sfrHasHardMissingSpecialty(match);
+
+    // Do not recover mixed jobs that truly require SAP, Oracle, or real sales/alliance.
+    if (hard.hasSap || hard.hasOracle || hard.hasRealSales) {
+      match.salesforceCrmRecovery = {
+        applied: false,
+        reason: "CRM関連求人ですが、SAP/Oracle/営業など候補者に不足する専門必須が含まれるため復元しません。",
+        hard
+      };
+      return match;
+    }
+
+    const after = __sfrRecoveryScore(match);
+
+    if (after > before) {
+      __sfrSetScore(match, after);
+      __sfrRank(match);
+
+      match.lowMatch = after < 35;
+      match.displayGroup = after >= 35 ? "recommended_or_check" : "reference_low_match";
+      match.noStrongMatch = false;
+      delete match.noStrongMatchMessage;
+
+      const req = __sfrRequiredInfo(match);
+
+      match.salesforceCrmRecovery = {
+        applied: true,
+        before,
+        after,
+        requiredRatio: req.ratio,
+        matched: req.matched,
+        total: req.total,
+        reason: "Salesforce/CRM求人がSalesforce内の'Sales'により営業求人扱いされていた可能性があるため、候補者のSalesforce実装経験をもとに再評価しました。"
+      };
+
+      match.documentPassReason = req.total > 0
+        ? `Salesforce/CRM求人として再評価しました。必須一致率${Math.round(req.ratio * 100)}%（${req.matched}/${req.total}）です。`
+        : "Salesforce/CRM求人として再評価しました。";
+
+      match.comment = [
+        `Salesforce/CRM求人として再評価：候補者はSalesforceを中心としたCRM刷新・DX推進、要件定義、設計、導入、定着化、保守開発の経験があります。`,
+        req.total > 0 ? `必須一致率${Math.round(req.ratio * 100)}%（${req.matched}/${req.total}）です。` : "",
+        `ただし、求人固有の不足条件がある場合は提案前に確認してください。`
+      ].filter(Boolean).join(" ");
+
+      match.recommendation_comment = match.comment;
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__SALESFORCE_CRM_RECOVERY_BUILD_WRAP_APPLIED__) {
+    global.__SALESFORCE_CRM_RECOVERY_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesSalesforceRecovery = buildMatches;
+
+    buildMatches = function buildMatchesWithSalesforceCrmRecovery(candidate, jobs) {
+      const matches = __prevBuildMatchesSalesforceRecovery(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      let changed = 0;
+      const adjusted = matches.map(match => {
+        const before = __sfrScore(match);
+        const updated = __sfrApply(match, candidate);
+        if (__sfrScore(updated) > before) changed++;
+        return updated;
+      });
+
+      adjusted.sort((a, b) => __sfrScore(b) - __sfrScore(a));
+
+      const recommended = adjusted.filter(m => __sfrScore(m) >= 35).length;
+      const low = adjusted.length - recommended;
+
+      console.log(`Salesforce/CRM recovery applied. changed=${changed}, recommended=${recommended}, low=${low}, total=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+
+        if (recommended === 0) {
+          match.noStrongMatch = true;
+          match.noStrongMatchMessage = "現時点で35点以上の高一致求人はありません。表示中の求人は参考候補です。";
+        }
+
+        return match;
+      });
+    };
+
+    console.log("===== Salesforce/CRM recovery applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
