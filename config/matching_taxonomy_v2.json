@@ -1,0 +1,42 @@
+{
+  "version": "v2",
+  "roleCategories": [
+    "SALESFORCE_CRM",
+    "SAP_SPECIALIST",
+    "SAP_LIGHT",
+    "ORACLE_ERP",
+    "AI_ENGINEER",
+    "DATA_SCIENCE",
+    "SOFTWARE_ENGINEER",
+    "EMBEDDED_IOT",
+    "CLOUD_APP_ENGINEER",
+    "CLOUD_INFRA",
+    "IT_CONSULT_DELIVERY",
+    "PM_PL",
+    "PMO",
+    "BUSINESS_TRANSFORMATION",
+    "SECURITY",
+    "SALES_ALLIANCE",
+    "GENERAL"
+  ],
+  "productLevels": [
+    "none",
+    "interest",
+    "user",
+    "support",
+    "adoption_or_support",
+    "implementation",
+    "lead",
+    "specialist"
+  ],
+  "strictRules": {
+    "salesforce": "Salesforce/CRM/CX導入・設計・要件定義・運用保守の具体経験がある場合のみ implementation 以上。",
+    "sapSpecialist": "SAP/SACの定着化・資料作成・利用促進は SAP_LIGHT。S/4HANA、FI/CO/MM/SD/PP、ABAP、Basis等の導入・設計・設定経験がある場合のみ SAP_SPECIALIST。",
+    "salesAlliance": "営業情報、営業活動、営業DX、Salesforce、Sales Cloud は本人の営業経験ではない。法人営業・提案営業・プリセールス・アライアンス・売上責任がある場合のみ SALES_ALLIANCE。",
+    "embedded": "車載ECU、組み込み、Linux/QNX、C言語、GPIO/I2C、カーナビ、IoT制御の具体経験があれば EMBEDDED_IOT。",
+    "aiEngineer": "LLM、LangChain、生成AI、機械学習、画像認識、AIシステム実装があれば AI_ENGINEER。",
+    "cloudApp": "AWS/Azure/GCP上でのアプリ/API/システム開発があれば CLOUD_APP_ENGINEER。",
+    "cloudInfra": "クラウド基盤設計、IaC、ネットワーク、コンテナ、運用基盤が主なら CLOUD_INFRA。単なるAWS/Azure利用だけでは強くしすぎない。",
+    "dataScience": "データ分析、クラスタリング、画像認識、データ基盤、BI/DWH/ETLの実装経験があれば DATA_SCIENCE。"
+  }
+}

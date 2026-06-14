@@ -15129,3 +15129,76 @@ if (!global.__DIRECT_ENGINEER_AI_RECOMMENDATIONS_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== PROFILE V2: candidate/job taxonomy logging only =====
+// Purpose:
+// - Stop one-off patching by introducing a shared taxonomy.
+// - For now, only attach/log candidateProfileV2 and scoreProfileV2 diagnostics.
+// - Scoring replacement comes after confirming v2 profiles for multiple resumes.
+if (!global.__PROFILE_V2_LOGGING_ONLY_APPLIED__) {
+  global.__PROFILE_V2_LOGGING_ONLY_APPLIED__ = true;
+
+  const {
+    normalizeCandidateProfileV2,
+    classifyJobProfileV2,
+    scoreProfileV2
+  } = require("./services/profileV2");
+
+  if (typeof analyzeResumeWithVision === "function" && !global.__PROFILE_V2_ANALYZE_WRAP_APPLIED__) {
+    global.__PROFILE_V2_ANALYZE_WRAP_APPLIED__ = true;
+
+    const __prevAnalyzeResumeWithVisionProfileV2 = analyzeResumeWithVision;
+
+    analyzeResumeWithVision = async function analyzeResumeWithVisionProfileV2(...args) {
+      const candidate = await __prevAnalyzeResumeWithVisionProfileV2(...args);
+
+      try {
+        candidate.candidateProfileV2 = normalizeCandidateProfileV2(candidate);
+
+        console.log("===== candidateProfileV2 generated =====");
+        console.log(JSON.stringify(candidate.candidateProfileV2, null, 2));
+      } catch (e) {
+        console.warn("candidateProfileV2 generation failed:", e.message);
+      }
+
+      return candidate;
+    };
+  }
+
+  if (typeof buildMatches === "function" && !global.__PROFILE_V2_MATCH_DIAGNOSTIC_WRAP_APPLIED__) {
+    global.__PROFILE_V2_MATCH_DIAGNOSTIC_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesProfileV2Diagnostic = buildMatches;
+
+    buildMatches = function buildMatchesWithProfileV2Diagnostic(candidate, jobs) {
+      const matches = __prevBuildMatchesProfileV2Diagnostic(candidate, jobs);
+
+      try {
+        const cp = candidate?.candidateProfileV2 || normalizeCandidateProfileV2(candidate);
+
+        if (Array.isArray(matches)) {
+          for (const match of matches.slice(0, 30)) {
+            const jp = classifyJobProfileV2(match.aiJobProfile || match.jobProfile || match);
+            const v2 = scoreProfileV2(cp, jp);
+            match.profileV2Diagnostic = {
+              candidateProfileV2: cp,
+              jobProfileV2: jp,
+              scoreProfileV2: v2
+            };
+          }
+
+          console.log("===== profileV2 diagnostics attached =====");
+          console.log(`profileV2 diagnostic matches=${Math.min(30, matches.length)}`);
+        }
+      } catch (e) {
+        console.warn("profileV2 diagnostic failed:", e.message);
+      }
+
+      return matches;
+    };
+  }
+
+  console.log("===== Profile V2 logging only applied =====");
+}
+// ===== END PROFILE V2 =====
+
