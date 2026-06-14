@@ -333,6 +333,49 @@ function scoreJob(candidate, job, cachedProfile) {
     notes.push("大規模PM要件が強いため上限42");
   }
 
+  // Domain / product-specific mismatch caps.
+  // These are general rules, not candidate-specific patches.
+  if (has(jobText, "ServiceNow") && !has(cText, "ServiceNow")) {
+    cap = Math.min(cap, 30);
+    notes.push("ServiceNow求人だが候補者にServiceNow経験なし");
+  }
+
+  if (has(jobText, "Pega|PEGA") && !has(cText, "Pega|PEGA")) {
+    cap = Math.min(cap, 30);
+    notes.push("Pega求人だが候補者にPega経験なし");
+  }
+
+  if (has(jobText, "人事|HCM|Employee Workflows|SuccessFactors|Workday") && !has(cText, "人事|HCM|人事システム|SuccessFactors|Workday")) {
+    cap = Math.min(cap, 30);
+    notes.push("人事/HRテクノロジー求人だが候補者に人事領域経験なし");
+  }
+
+  if (has(jobText, "Supply Chain|SCM|サプライチェーン|物流|調達|購買|生産管理") && !has(cText, "Supply Chain|SCM|サプライチェーン|物流|調達|購買|生産管理")) {
+    cap = Math.min(cap, 30);
+    notes.push("SCM/サプライチェーン求人だが候補者に該当領域経験なし");
+  }
+
+  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|ゲーム|3D|XR|VR|AR") && !has(cText, "Unreal|Unity|ゲーム|3D|XR|VR|AR")) {
+    cap = Math.min(cap, 30);
+    notes.push("Unreal/Unity/リアルタイム開発求人だが候補者に該当経験なし");
+  }
+
+  if (has(jobText, "RPA|UiPath|Automation Anywhere|Blue Prism") && !has(cText, "RPA|UiPath|Automation Anywhere|Blue Prism")) {
+    cap = Math.min(cap, 40);
+    notes.push("RPA求人だが候補者にRPA経験なし");
+  }
+
+  if (has(jobText, "リセール|製品販売|テクノロジーセールス|セールス") && !cCats.has("SALES_ALLIANCE")) {
+    cap = Math.min(cap, 30);
+    notes.push("セールス/リセール求人だが候補者に営業経験なし");
+  }
+
+  // Oracle DB is not Oracle ERP. Only cap Oracle ERP/Fusion/Cloud ERP jobs.
+  if (has(jobText, "Oracle Fusion|Oracle ERP|Oracle Cloud ERP|EPM Cloud|SCM Cloud|HCM Cloud") && !cCats.has("ORACLE_ERP")) {
+    cap = Math.min(cap, 30);
+    notes.push("Oracle ERP求人だが候補者にOracle ERP経験なし");
+  }
+
   if (requiredTotal > 0) {
     if (requiredRate === 0) cap = Math.min(cap, 25);
     else if (requiredRate < 30) cap = Math.min(cap, 45);
@@ -392,6 +435,10 @@ function scoreJob(candidate, job, cachedProfile) {
       notes.join("。")
     ].filter(Boolean).join(" ")
   };
+
+  result.recommendation_comment = result.comment;
+  result.documentPassReason = result.reason;
+  return result;
 }
 
 function rankForScore(score) {
