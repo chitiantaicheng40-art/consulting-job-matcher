@@ -11685,3 +11685,404 @@ if (!global.__CACHED_AI_JOB_PROFILE_SCORING_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: final AI profile reranker =====
+// Purpose:
+// - Treat AI candidateProfile as source of truth.
+// - Strongly downrank SAP/Oracle/Sales jobs when AI profile says candidate lacks core experience.
+// - Boost Salesforce/CRM/CX jobs for Salesforce/CRM/CX candidates.
+// - Prevent old keyword-based matchedRequired/comments from dominating final TOP10.
+if (!global.__FINAL_AI_PROFILE_RERANKER_APPLIED__) {
+  global.__FINAL_AI_PROFILE_RERANKER_APPLIED__ = true;
+
+  function __frText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__frText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__frText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __frHas(text, patterns) {
+    const s = String(text || "");
+    return patterns.some(p => p.test(s));
+  }
+
+  function __frScore(match) {
+    const raw = match?.score ?? match?.totalScore ?? match?.matchScore ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function __frSetScore(match, score) {
+    const fixed = Math.max(0, Math.min(100, Math.round(score)));
+    match.score = fixed;
+    if ("totalScore" in match) match.totalScore = fixed;
+    if ("matchScore" in match) match.matchScore = fixed;
+    return match;
+  }
+
+  function __frRank(match) {
+    const s = __frScore(match);
+    if (s >= 70) {
+      match.rank = "A";
+      match.documentPassPossibility = "高";
+      match.passPossibility = "高";
+    } else if (s >= 50) {
+      match.rank = "B";
+      match.documentPassPossibility = "中";
+      match.passPossibility = "中";
+    } else if (s >= 30) {
+      match.rank = "C";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    } else {
+      match.rank = "D";
+      match.documentPassPossibility = "低";
+      match.passPossibility = "低";
+    }
+    return match;
+  }
+
+  function __frAppendComment(match, note) {
+    if (!note) return match;
+    const current = match.comment || match.reason || "";
+    if (!current) {
+      match.comment = note;
+      match.reason = note;
+    } else if (!String(current).includes(note)) {
+      match.comment = `${current} ${note}`;
+      match.reason = match.reason ? `${match.reason} ${note}` : match.comment;
+    }
+    return match;
+  }
+
+  function __frJob(match) {
+    return match?.job || match?.jobData || match?.originalJob || match;
+  }
+
+  function __frJobText(match) {
+    return [
+      __frText(__frJob(match)),
+      __frText(match.aiJobProfile),
+      __frText(match.jobProfile)
+    ].join("\n");
+  }
+
+  function __frAiProfile(candidate) {
+    return candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
+  }
+
+  function __frCategory(profile, key) {
+    const rich = profile?.roleCategories;
+
+    if (rich && !Array.isArray(rich) && rich[key]) {
+      return rich[key];
+    }
+
+    const list = profile?.roleCategoryList || profile?.roleCategories || [];
+    if (Array.isArray(list) && list.includes(key)) {
+      return { match: true, level: "confirmed" };
+    }
+
+    return { match: false, level: "none" };
+  }
+
+  function __frProduct(profile, key) {
+    return profile?.productLevels?.[key] || "none";
+  }
+
+  function __frJobPrimary(match) {
+    return (
+      match?.aiJobProfile?.primaryRoleCategory ||
+      match?.jobProfile?.primaryRoleCategory ||
+      ""
+    );
+  }
+
+  function __frIsSapJob(match) {
+    const primary = __frJobPrimary(match);
+    const text = __frJobText(match);
+    return primary === "SAP_SPECIALIST" || __frHas(text, [
+      /SAP/i,
+      /S\/4HANA/i,
+      /ABAP/i,
+      /Basis/i,
+      /Fiori/i,
+      /BTP/i,
+      /SAP\s*(PP|MM|SD|FI|CO|PM|PLM|DM)/i,
+      /SAPコンサル/i
+    ]);
+  }
+
+  function __frIsOracleJob(match) {
+    const primary = __frJobPrimary(match);
+    const text = __frJobText(match);
+    return primary === "ORACLE_ERP" || __frHas(text, [
+      /Oracle\s*Fusion/i,
+      /Oracle\s*Cloud\s*ERP/i,
+      /Oracle\s*ERP/i,
+      /Oracle\s*EPM/i,
+      /Oracle\s*SCM/i,
+      /Oracle\s*HCM/i,
+      /OCI/i,
+      /Oracle領域/i
+    ]);
+  }
+
+  function __frIsSalesJob(match) {
+    const primary = __frJobPrimary(match);
+    const text = __frJobText(match);
+    return primary === "SALES_ALLIANCE" || __frHas(text, [
+      /アライアンス/,
+      /法人営業/,
+      /ソリューション営業/,
+      /アカウント営業/,
+      /パートナー営業/,
+      /プリセールス/,
+      /Sales/i,
+      /Alliance/i,
+      /Account/i,
+      /GTM/i,
+      /販売実績/,
+      /売上責任/
+    ]);
+  }
+
+  function __frIsSalesforceCrmJob(match) {
+    const primary = __frJobPrimary(match);
+    const text = __frJobText(match);
+    return primary === "SALESFORCE_CRM" || __frHas(text, [
+      /Salesforce/i,
+      /SFDC/i,
+      /CRM/i,
+      /CX/i,
+      /SFA/i,
+      /Customer/i,
+      /顧客接点/,
+      /顧客データ/,
+      /営業DX/,
+      /マーケティングDX/,
+      /CRM刷新/,
+      /カスタマー/
+    ]);
+  }
+
+  function __frIsItTransformationJob(match) {
+    const primary = __frJobPrimary(match);
+    const text = __frJobText(match);
+    return [
+      "IT_CONSULT_DELIVERY",
+      "PM_PL",
+      "PMO",
+      "BUSINESS_TRANSFORMATION",
+      "DATA_ANALYTICS",
+      "CLOUD_INFRA"
+    ].includes(primary) || __frHas(text, [
+      /ITコンサル/,
+      /DX/i,
+      /業務改革/,
+      /業務変革/,
+      /要件定義/,
+      /システム導入/,
+      /基幹システム/,
+      /データ活用/,
+      /BI/i,
+      /Tableau/i,
+      /PMO/i,
+      /プロジェクトマネジメント/
+    ]);
+  }
+
+  function __frRequiredRatio(match) {
+    const matched = [
+      ...(Array.isArray(match.matchedRequired) ? match.matchedRequired : []),
+      ...(Array.isArray(match.matchedRequiredRequirements) ? match.matchedRequiredRequirements : []),
+      ...(Array.isArray(match.matchedMust) ? match.matchedMust : []),
+      ...(Array.isArray(match.requiredMatched) ? match.requiredMatched : [])
+    ];
+
+    const missing = [
+      ...(Array.isArray(match.missingRequired) ? match.missingRequired : []),
+      ...(Array.isArray(match.missingRequiredRequirements) ? match.missingRequiredRequirements : []),
+      ...(Array.isArray(match.unmatchedRequired) ? match.unmatchedRequired : []),
+      ...(Array.isArray(match.unmatchedRequiredRequirements) ? match.unmatchedRequiredRequirements : []),
+      ...(Array.isArray(match.missingMust) ? match.missingMust : [])
+    ];
+
+    if (matched.length + missing.length > 0) {
+      return {
+        ratio: matched.length / Math.max(1, matched.length + missing.length),
+        missingCount: missing.length
+      };
+    }
+
+    return { ratio: null, missingCount: 0 };
+  }
+
+  function __frApply(match, candidate) {
+    const profile = __frAiProfile(candidate);
+    const notes = [];
+
+    let score = __frScore(match);
+    let cap = 100;
+    let penalty = 0;
+    let bonus = 0;
+
+    const sf = __frCategory(profile, "SALESFORCE_CRM");
+    const sapSpecialist = __frCategory(profile, "SAP_SPECIALIST");
+    const sapLight = __frCategory(profile, "SAP_LIGHT");
+    const oracle = __frCategory(profile, "ORACLE_ERP");
+    const sales = __frCategory(profile, "SALES_ALLIANCE");
+    const it = __frCategory(profile, "IT_CONSULT_DELIVERY");
+    const pm = __frCategory(profile, "PM_PL");
+    const pmo = __frCategory(profile, "PMO");
+    const bt = __frCategory(profile, "BUSINESS_TRANSFORMATION");
+    const data = __frCategory(profile, "DATA_ANALYTICS");
+
+    const sapLevel = __frProduct(profile, "sap");
+    const sfLevel = __frProduct(profile, "salesforce");
+    const oracleLevel = __frProduct(profile, "oracle");
+    const salesLevel = __frProduct(profile, "sales");
+
+    // Required ratio cap still applies
+    const req = __frRequiredRatio(match);
+    if (req.ratio !== null) {
+      if (req.ratio < 0.3) {
+        cap = Math.min(cap, 30);
+        notes.push("必須一致率が30%未満のため、最終上限を30点に制限しました。");
+      } else if (req.ratio < 0.5) {
+        cap = Math.min(cap, 45);
+        notes.push("必須一致率が50%未満のため、最終上限を45点に制限しました。");
+      } else if (req.ratio < 0.7) {
+        cap = Math.min(cap, 65);
+        notes.push("必須一致率が70%未満のため、最終上限を65点に制限しました。");
+      }
+    }
+
+    if (req.missingCount >= 8) {
+      cap = Math.min(cap, 40);
+      notes.push("不足必須が8件以上のため、最終上限を40点に制限しました。");
+    } else if (req.missingCount >= 5) {
+      cap = Math.min(cap, 50);
+      notes.push("不足必須が5件以上のため、最終上限を50点に制限しました。");
+    }
+
+    // Strong source-of-truth gates
+    if (__frIsSapJob(match)) {
+      if (sapSpecialist.match === true || sapLevel === "implementation" || sapLevel === "lead") {
+        bonus += 8;
+        notes.push("AI候補者ProfileでSAP専門経験が確認できたため加点しました。");
+      } else if (sapLight.match === true || sapLevel === "adoption_or_support") {
+        cap = Math.min(cap, 28);
+        penalty += 20;
+        notes.push("AI候補者ProfileではSAP/SAC定着化・支援経験のため、SAP専門求人は最終上限28点に制限しました。");
+      } else {
+        cap = Math.min(cap, 20);
+        penalty += 30;
+        notes.push("AI候補者ProfileでSAP経験が確認できないため、SAP求人は最終上限20点に制限しました。");
+      }
+    }
+
+    if (__frIsOracleJob(match)) {
+      if (oracle.match === true || oracleLevel === "implementation" || oracleLevel === "lead") {
+        bonus += 8;
+        notes.push("AI候補者ProfileでOracle ERP/Fusion/OCI経験が確認できたため加点しました。");
+      } else {
+        cap = Math.min(cap, 20);
+        penalty += 30;
+        notes.push("AI候補者ProfileでOracle ERP/Fusion/OCI導入経験が確認できないため、Oracle求人は最終上限20点に制限しました。");
+      }
+    }
+
+    if (__frIsSalesJob(match)) {
+      if (sales.match === true || salesLevel === "confirmed") {
+        bonus += 8;
+        notes.push("AI候補者Profileで営業/アライアンス経験が確認できたため加点しました。");
+      } else {
+        cap = Math.min(cap, 20);
+        penalty += 30;
+        notes.push("AI候補者Profileで本人の営業/アライアンス経験が確認できないため、営業系求人は最終上限20点に制限しました。");
+      }
+    }
+
+    if (__frIsSalesforceCrmJob(match)) {
+      if (sf.match === true || ["implementation", "lead"].includes(sfLevel)) {
+        bonus += sfLevel === "lead" ? 30 : 25;
+        notes.push("AI候補者ProfileでSalesforce/CRM/CX経験が確認できたため大きく加点しました。");
+      } else {
+        cap = Math.min(cap, 50);
+        penalty += 15;
+        notes.push("Salesforce/CRM/CX求人ですが、AI候補者Profileで該当経験が確認できないため減点しました。");
+      }
+    }
+
+    if (__frIsItTransformationJob(match)) {
+      if (it.match === true || pm.match === true || pmo.match === true || bt.match === true || data.match === true) {
+        bonus += 12;
+        notes.push("AI候補者ProfileでIT/PM/業務変革/データ活用経験が確認できたため加点しました。");
+      }
+    }
+
+    score = Math.min(cap, score - penalty + bonus);
+
+    __frSetScore(match, score);
+    __frRank(match);
+
+    match.finalAiProfileRerank = {
+      applied: true,
+      primaryRole: profile.primaryRole,
+      cap,
+      penalty,
+      bonus,
+      requiredRatio: req.ratio,
+      missingCount: req.missingCount,
+      notes
+    };
+
+    if (notes.length > 0) {
+      __frAppendComment(match, `最終AI判定：${notes.join(" ")}`);
+    }
+
+    return match;
+  }
+
+  if (typeof buildMatches === "function" && !global.__FINAL_AI_PROFILE_RERANKER_BUILD_WRAP_APPLIED__) {
+    global.__FINAL_AI_PROFILE_RERANKER_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatches_finalAiReranker = buildMatches;
+
+    buildMatches = function buildMatchesWithFinalAiProfileReranker(candidate, jobs) {
+      const matches = __prevBuildMatches_finalAiReranker(candidate, jobs);
+      if (!Array.isArray(matches)) return matches;
+
+      const profile = __frAiProfile(candidate);
+      if (!profile || (!profile.roleCategories && !profile.roleCategoryList)) {
+        console.log("Final AI reranker skipped: no AI candidate profile.");
+        return matches;
+      }
+
+      const adjusted = matches.map(match => __frApply(match, candidate));
+
+      adjusted.sort((a, b) => __frScore(b) - __frScore(a));
+
+      console.log(`Final AI profile reranker applied. matches=${adjusted.length}`);
+
+      return adjusted.map((match, index) => {
+        match.rankNo = index + 1;
+        match.order = index + 1;
+        return match;
+      });
+    };
+
+    console.log("===== Final AI profile reranker applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
