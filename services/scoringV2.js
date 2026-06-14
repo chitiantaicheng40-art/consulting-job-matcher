@@ -97,16 +97,71 @@ function getPreferred(profile, job) {
 }
 
 function candidateText(candidate) {
-  return [
+  // Robustly collect candidate-side text only.
+  // In some routes, resume text is stored under different keys,
+  // so relying on resumeText/rawText only makes career years and Java/React evidence disappear.
+  const seen = new WeakSet();
+
+  function walk(value, key = "", depth = 0) {
+    if (value == null || depth > 8) return "";
+
+    const k = String(key || "").toLowerCase();
+
+    // Avoid job/match result pollution. Candidate object should not normally contain these,
+    // but this keeps scoring clean if route payloads are merged.
+    if ([
+      "jobs",
+      "job",
+      "matches",
+      "match",
+      "recommendations",
+      "aiJobProfile",
+      "jobProfileV2",
+      "profileV2Scoring"
+    ].includes(k)) {
+      return "";
+    }
+
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+    if (Array.isArray(value)) {
+      return value.map(v => walk(v, key, depth + 1)).join("\n");
+    }
+
+    if (typeof value === "object") {
+      if (seen.has(value)) return "";
+      seen.add(value);
+
+      return Object.entries(value)
+        .map(([childKey, childValue]) => walk(childValue, childKey, depth + 1))
+        .join("\n");
+    }
+
+    return "";
+  }
+
+  const direct = [
     textOf(candidate?.rawResumeTextForValidation),
     textOf(candidate?.resumeText),
     textOf(candidate?.rawText),
+    textOf(candidate?.extractedText),
+    textOf(candidate?.ocrText),
+    textOf(candidate?.parsedText),
+    textOf(candidate?.fullText),
+    textOf(candidate?.profileText),
     textOf(candidate?.skills),
     textOf(candidate?.projects),
+    textOf(candidate?.experiences),
+    textOf(candidate?.workExperiences),
     textOf(candidate?.career_summary),
     textOf(candidate?.summary),
     textOf(candidate?.candidateProfileV2?.evidence)
   ].join("\n");
+
+  const full = walk(candidate);
+
+  return [direct, full].filter(Boolean).join("\n");
 }
 
 function candidateYears(candidate) {
@@ -531,6 +586,14 @@ function buildMatchesV2(candidate, jobs, options = {}) {
   const cache = loadJobProfileCache();
   const cp = candidate?.candidateProfileV2 || normalizeCandidateProfileV2(candidate);
   candidate.candidateProfileV2 = cp;
+
+  const debugCandidateText = candidateText(candidate);
+  console.log("===== scoringV2 candidate debug =====");
+  console.log("primaryRole:", cp.primaryRole);
+  console.log("roleCategories:", Array.isArray(cp.roleCategories) ? cp.roleCategories.join(", ") : "");
+  console.log("productLevels:", JSON.stringify(cp.productLevels || {}));
+  console.log("candidateYears:", candidateYears(candidate));
+  console.log("candidateTextSample:", debugCandidateText.slice(0, 500).replace(/\n/g, " "));
 
   const safeJobs = arr(jobs);
   const matches = [];
