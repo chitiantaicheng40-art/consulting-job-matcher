@@ -13958,3 +13958,208 @@ if (!global.__STRICT_SALESFORCE_RECOVERY_GUARD_APPLIED__) {
 }
 // ===== END FINAL OVERRIDE =====
 
+
+// ===== FINAL OVERRIDE: expand matching pool by AI job profile =====
+// Purpose:
+// - Current matching pool can miss true Salesforce/CRM jobs.
+// - If candidate AI profile has SALESFORCE_CRM, add relevant jobs from job_profiles_cache.json
+//   into the jobs array before buildMatches scoring starts.
+if (!global.__PROFILE_BASED_JOB_POOL_EXPANSION_APPLIED__) {
+  global.__PROFILE_BASED_JOB_POOL_EXPANSION_APPLIED__ = true;
+
+  const fs = require("fs");
+  const path = require("path");
+
+  function __pjeText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(__pjeText).join(" ");
+    if (typeof value === "object") {
+      try {
+        return Object.values(value).map(__pjeText).join(" ");
+      } catch (_) {
+        return "";
+      }
+    }
+    return String(value);
+  }
+
+  function __pjeCandidateProfile(candidate) {
+    return candidate?.aiCandidateProfile || candidate?.candidateProfile || {};
+  }
+
+  function __pjeCandidateCategories(candidate) {
+    const p = __pjeCandidateProfile(candidate);
+
+    if (Array.isArray(p.roleCategoryList)) return p.roleCategoryList;
+    if (Array.isArray(p.roleCategories)) return p.roleCategories;
+
+    if (p.roleCategories && typeof p.roleCategories === "object") {
+      return Object.entries(p.roleCategories)
+        .filter(([, v]) => v && v.match === true)
+        .map(([k]) => k);
+    }
+
+    return [];
+  }
+
+  function __pjeCandidateHasSalesforce(candidate) {
+    const p = __pjeCandidateProfile(candidate);
+    const cats = __pjeCandidateCategories(candidate);
+    const sf = p?.productLevels?.salesforce || candidate?.productLevels?.salesforce || "none";
+
+    return cats.includes("SALESFORCE_CRM") || ["implementation", "lead"].includes(sf);
+  }
+
+  function __pjeLoadJson(file) {
+    try {
+      if (!fs.existsSync(file)) return null;
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (e) {
+      console.warn("profile pool expansion: failed to load", file, e.message);
+      return null;
+    }
+  }
+
+  function __pjeJobKey(job) {
+    return [
+      job?.url,
+      job?.jobUrl,
+      job?.detailUrl,
+      job?.company,
+      job?.title,
+      job?.position,
+      job?.name
+    ].filter(Boolean).join("||");
+  }
+
+  function __pjeProfileKey(profile) {
+    return [
+      profile?.url,
+      profile?.company,
+      profile?.title,
+      profile?.displayName,
+      profile?.jobKey
+    ].filter(Boolean).join("||");
+  }
+
+  function __pjeIsGoodSalesforceProfile(profile) {
+    const text = [
+      __pjeText(profile.displayName),
+      __pjeText(profile.company),
+      __pjeText(profile.title),
+      __pjeText(profile.url),
+      __pjeText(profile.summary),
+      __pjeText(profile.primaryRoleCategory),
+      __pjeText(profile.roleCategories),
+      __pjeText(profile.coreMust),
+      __pjeText(profile.productRequirements)
+    ].join("\n");
+
+    const cats = [
+      profile.primaryRoleCategory,
+      ...(Array.isArray(profile.roleCategories) ? profile.roleCategories : [])
+    ].filter(Boolean);
+
+    const crmPositive =
+      cats.includes("SALESFORCE_CRM") ||
+      /Salesforce|AI×Salesforce|CRM|CX\/CRM|Customer|カスタマー|顧客接点|顧客体験|顧客管理|CRM刷新/i.test(text);
+
+    const hardNegative =
+      /SAP|S\/4HANA|Oracle|PLM|SCM|調達|購買|サプライチェーン|物流|生産|R&D|Microsoftソリューション|人的資本|HR|会計|HCM|HXM|セキュリティ/i.test(text)
+      && !/Salesforce|AI×Salesforce|CX\/CRM|CRMコンサル|Customer|カスタマー/i.test(text);
+
+    return crmPositive && !hardNegative;
+  }
+
+  function __pjeProfileToJob(profile) {
+    const display = profile.displayName || "";
+    const slash = display.includes(" / ") ? display.split(" / ") : [];
+
+    const company = profile.company || slash[0] || "Unknown";
+    const title = profile.title || slash.slice(1).join(" / ") || display || "AI profile matched job";
+
+    const requiredRequirements = Array.isArray(profile.coreMust)
+      ? profile.coreMust.map(x => typeof x === "string" ? x : x.requirement).filter(Boolean)
+      : [];
+
+    const preferredRequirements = Array.isArray(profile.preferred)
+      ? profile.preferred.map(x => typeof x === "string" ? x : x.requirement).filter(Boolean)
+      : [];
+
+    const locations = profile?.locationRequirement?.locations || profile.locations || [];
+
+    return {
+      company,
+      title,
+      position: title,
+      name: title,
+      url: profile.url,
+      requiredRequirements,
+      preferredRequirements,
+      locations,
+      source: "job_profiles_cache_expansion",
+      aiJobProfileInjected: profile,
+      profileExpansion: true,
+      profileExpansionReason: "候補者がSalesforce/CRM/CX経験を持つため、AI求人ProfileからCRM関連求人を候補集合に追加しました。"
+    };
+  }
+
+  function __pjeExpandJobs(candidate, jobs) {
+    if (!Array.isArray(jobs)) return jobs;
+    if (!__pjeCandidateHasSalesforce(candidate)) return jobs;
+
+    const profilePath = path.join(process.cwd(), "job_profiles_cache.json");
+    const profilesObj = __pjeLoadJson(profilePath);
+    if (!profilesObj) return jobs;
+
+    const profiles = Object.values(profilesObj);
+    const crmProfiles = profiles.filter(__pjeIsGoodSalesforceProfile).slice(0, 80);
+
+    const existingKeys = new Set(jobs.map(__pjeJobKey).filter(Boolean));
+
+    const additions = [];
+
+    for (const p of crmProfiles) {
+      const key = __pjeProfileKey(p);
+      const already = jobs.some(j =>
+        (p.url && (j.url === p.url || j.jobUrl === p.url || j.detailUrl === p.url)) ||
+        (__pjeText(j.title || j.position || j.name).trim() && __pjeText(p.displayName || p.title).includes(__pjeText(j.title || j.position || j.name).trim()))
+      );
+
+      if (already) continue;
+
+      const job = __pjeProfileToJob(p);
+      const jobKey = __pjeJobKey(job);
+
+      if (!existingKeys.has(jobKey)) {
+        additions.push(job);
+        existingKeys.add(jobKey);
+      }
+    }
+
+    if (additions.length > 0) {
+      console.log(`Profile-based job pool expansion added ${additions.length} Salesforce/CRM jobs. before=${jobs.length}, after=${jobs.length + additions.length}`);
+      return [...jobs, ...additions];
+    }
+
+    console.log(`Profile-based job pool expansion found 0 new Salesforce/CRM jobs. jobs=${jobs.length}`);
+
+    return jobs;
+  }
+
+  if (typeof buildMatches === "function" && !global.__PROFILE_BASED_JOB_POOL_EXPANSION_BUILD_WRAP_APPLIED__) {
+    global.__PROFILE_BASED_JOB_POOL_EXPANSION_BUILD_WRAP_APPLIED__ = true;
+
+    const __prevBuildMatchesProfilePoolExpansion = buildMatches;
+
+    buildMatches = function buildMatchesWithProfileBasedJobPoolExpansion(candidate, jobs) {
+      const expandedJobs = __pjeExpandJobs(candidate, jobs);
+      return __prevBuildMatchesProfilePoolExpansion(candidate, expandedJobs);
+    };
+
+    console.log("===== Profile-based job pool expansion applied =====");
+  }
+}
+// ===== END FINAL OVERRIDE =====
+
