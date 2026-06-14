@@ -201,6 +201,36 @@ function matchRequirement(req, ctx) {
 
   if (!r.trim()) return false;
 
+  // Specific product/domain requirements must be judged before generic "開発/設計/テスト".
+  // Otherwise "Unreal Engineを活用したコンテンツ開発経験" is wrongly matched by generic development experience.
+  if (has(r, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR")) {
+    return has(cText, "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR");
+  }
+
+  if (has(r, "ServiceNow")) {
+    return has(cText, "ServiceNow");
+  }
+
+  if (has(r, "Pega|PEGA")) {
+    return has(cText, "Pega|PEGA");
+  }
+
+  if (has(r, "AIエンジニア|AIアーキテクト|生成AI|LLM|機械学習|データサイエンティスト")) {
+    return cCats.has("AI_ENGINEER") || cCats.has("DATA_SCIENCE") || products.genai === "implementation";
+  }
+
+  if (has(r, "人事|HCM|Employee Workflows|SuccessFactors|Workday")) {
+    return has(cText, "人事|HCM|人事システム|SuccessFactors|Workday");
+  }
+
+  if (has(r, "Supply Chain|SCM|サプライチェーン|物流|調達|購買|生産管理")) {
+    return has(cText, "Supply Chain|SCM|サプライチェーン|物流|調達|購買|生産管理");
+  }
+
+  if (has(r, "法人営業|提案営業|プリセールス|アライアンス|リセール|製品販売|営業経験|テクノロジーセールス")) {
+    return cCats.has("SALES_ALLIANCE") || products.sales === "confirmed";
+  }
+
   // Experience years
   const yearMatch = r.match(/([0-9０-９]+)\s*年以上/);
   if (yearMatch) {
@@ -534,6 +564,18 @@ function scoreJob(candidate, job, cachedProfile) {
     notes.push("PM/大規模PJ管理要件が強く、実務年数・管理経験が不足");
   }
 
+  // Additional junior caps for architecture / transformation roles.
+  if (years < 3 && has(jobText, "TAT|Tech Architecture Transformation|Architecture|Transformation|アーキテクチャ|IT戦略|IT企画|構想策定")) {
+    cap = Math.min(cap, 58);
+    notes.push("実務3年未満の若手候補者のため、Architecture/Transformation/IT戦略求人は上限58");
+  }
+
+  // Strong hard cap for creative/realtime engine jobs.
+  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR") && !has(cText, "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR")) {
+    cap = Math.min(cap, 25);
+    notes.push("Unreal/Unity/3DCG/リアルタイム開発求人だが候補者に該当経験なし");
+  }
+
   // Do not allow 80+ unless the candidate clearly matches the job's main specialty.
   const hasStrongSpecialtyMatch =
     requiredRate >= 80 &&
@@ -663,11 +705,28 @@ function buildMatchesV2(candidate, jobs, options = {}) {
 
   matches.sort((a, b) => b.score - a.score);
 
-  return matches.slice(0, limit).map((m, i) => ({
-    ...m,
-    rankNo: i + 1,
-    order: i + 1
-  }));
+  return matches.slice(0, limit).map((m, i) => {
+    const fallbackComment = [
+      m.comment,
+      m.recommendation_comment,
+      m.reason,
+      m.documentPassReason,
+      m.profileV2Scoring && Array.isArray(m.profileV2Scoring.notes) ? m.profileV2Scoring.notes.join("。") : ""
+    ].filter(Boolean).join(" ");
+
+    const finalComment = fallbackComment || `Profile v2共通スコアリングで${m.score}点と判定しました。`;
+
+    return {
+      ...m,
+      comment: finalComment,
+      recommendation_comment: finalComment,
+      recommendationComment: finalComment,
+      matchComment: finalComment,
+      aiComment: finalComment,
+      rankNo: i + 1,
+      order: i + 1
+    };
+  });
 }
 
 module.exports = {
