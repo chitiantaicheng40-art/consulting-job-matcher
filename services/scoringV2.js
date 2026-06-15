@@ -97,6 +97,36 @@ function getPreferred(profile, job) {
     .filter(Boolean);
 }
 
+function isGenAiImplementationText(t) {
+  return has(
+    t || "",
+    "RAG|LangChain|LangGraph|LLM.*(実装|開発|構築|アプリ)|生成AI.*(実装|開発|構築|アプリ|システム)|AIエージェント.*(実装|開発|構築)|機械学習モデル|モデル開発|MLOps|ファインチューニング|ベクトルDB|Vector DB|プロンプトエンジニアリング.*(実装|開発)"
+  );
+}
+
+function isGenAiResearchOnlyText(t) {
+  const text = t || "";
+  return (
+    has(text, "生成AI.*(調査|動向|キャッチアップ|資料|報告書|情報収集)|AI.*(調査|動向|キャッチアップ|資料|報告書|情報収集)|技術キャッチアップ|経営報告書") &&
+    !isGenAiImplementationText(text)
+  );
+}
+
+function normalizeCandidateProfileForScoring(cp, cText) {
+  const next = {
+    ...(cp || {}),
+    roleCategories: Array.isArray(cp?.roleCategories) ? [...cp.roleCategories] : [],
+    productLevels: { ...((cp && cp.productLevels) || {}) }
+  };
+
+  if (isGenAiResearchOnlyText(cText)) {
+    next.productLevels.genai = "research";
+    next.roleCategories = next.roleCategories.filter(c => c !== "AI_ENGINEER");
+  }
+
+  return next;
+}
+
 function candidateText(candidate) {
   // Robustly collect candidate-side text only.
   // In some routes, resume text is stored under different keys,
@@ -287,12 +317,12 @@ function matchRequirement(req, ctx) {
   }
 
   if (has(r, "AIエンジニア|AIアーキテクト|LLM|機械学習|Machine Learning|AI開発|AIエンジニアリング")) {
-    return products.genai === "implementation" || cCats.has("AI_ENGINEER");
+    return products.genai === "implementation";
   }
 
   if (has(r, "生成AI|AI利活用|AI活用")) {
     if (has(r, "実装|開発|構築|エンジニアリング")) {
-      return products.genai === "implementation" || cCats.has("AI_ENGINEER");
+      return products.genai === "implementation";
     }
     return products.genai === "implementation" || products.genai === "usage";
   }
@@ -330,18 +360,18 @@ function matchRequirement(req, ctx) {
 
   // AI / data
   if (has(r, "LLM|機械学習|Machine Learning|AIエンジニアリング|AI開発")) {
-    return products.genai === "implementation" || cCats.has("AI_ENGINEER");
+    return products.genai === "implementation";
   }
 
   if (has(r, "生成AI|AI利活用|AI活用")) {
     if (has(r, "実装|開発|構築|エンジニアリング")) {
-      return products.genai === "implementation" || cCats.has("AI_ENGINEER");
+      return products.genai === "implementation";
     }
     return products.genai === "implementation" || products.genai === "usage";
   }
 
   if (has(r, "AI")) {
-    return products.genai === "implementation" || products.genai === "usage" || cCats.has("AI_ENGINEER");
+    return products.genai === "implementation" || products.genai === "usage";
   }
   if (has(r, "データ分析|データサイエン|BI|DWH|ETL|データ基盤")) {
     return cCats.has("DATA_SCIENCE") || products.data === "implementation";
