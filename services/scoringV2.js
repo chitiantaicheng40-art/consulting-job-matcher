@@ -22,7 +22,7 @@ function normalizeDomainFitReasonForDisplay(cp, reason) {
 
   if (!isSalesforceCandidate) return reason;
 
-  return reason.replace(/candidate=([^,。]+)/, (m, raw) => {
+  return reason.replace(/candidate=([^,。]+)/g, (m, raw) => {
     const domains = String(raw)
       .split("/")
       .map(x => x.trim())
