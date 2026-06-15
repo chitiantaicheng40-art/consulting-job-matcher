@@ -6,6 +6,36 @@ const {
 } = require("./profileV2");
 const { evaluateDomainFit } = require("./domainFit");
 
+
+function normalizeCandidateCategoriesForScoring(cp, categories) {
+  const levels = cp?.experienceLevels || {};
+  const products = cp?.productLevels || {};
+  const normalized = new Set(categories || []);
+
+  const isSalesforceCandidate =
+    normalized.has("SALESFORCE_CRM") ||
+    products.salesforce === "implementation" ||
+    levels.salesforce === "implementation";
+
+  if (isSalesforceCandidate) {
+    // Salesforce product names such as Sales Cloud / Service Cloud / Data Cloud
+    // should not make the candidate an AI/Data or generic Cloud engineer.
+    if (levels.aiData !== "implementation") {
+      normalized.delete("DATA_SCIENCE");
+      normalized.delete("AI_ENGINEER");
+      normalized.delete("AI_DATA_ENGINEER");
+    }
+
+    if (levels.cloud !== "implementation") {
+      normalized.delete("CLOUD_APP_ENGINEER");
+      normalized.delete("CLOUD_INFRA");
+    }
+  }
+
+  return normalized;
+}
+
+
 function textOf(value) {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -289,7 +319,8 @@ function matchRequirement(req, ctx) {
   const r = req || "";
   const cText = ctx.cText;
   const cp = ctx.cp || {};
-  const cCats = new Set(arr(cp.roleCategories));
+  let cCats = new Set(arr(cp.roleCategories));
+  cCats = normalizeCandidateCategoriesForScoring(cp, cCats);
   const products = cp.productLevels || {};
   const years = ctx.years;
 
@@ -430,7 +461,8 @@ function matchRequirement(req, ctx) {
 
 function scoreJob(candidate, job, cachedProfile) {
   const cp = candidate?.candidateProfileV2 || normalizeCandidateProfileV2(candidate);
-  const cCats = new Set(arr(cp.roleCategories));
+  let cCats = new Set(arr(cp.roleCategories));
+  cCats = normalizeCandidateCategoriesForScoring(cp, cCats);
   const products = cp.productLevels || {};
   const cText = candidateText(candidate);
   const years = candidateYears(candidate);
