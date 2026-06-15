@@ -68,6 +68,10 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
     addScore(scores, DOMAIN.JAVA_WEB_APP_ENGINEER, 50, "Java/Web app evidence");
   }
 
+  if (has(t, "GIS|ArcGIS|データ分析|データ可視化|可視化|データ統合|SQL|BI|DWH|ETL|分析")) {
+    addScore(scores, DOMAIN.AI_DATA_ENGINEER, 45, "data/GIS analytics evidence");
+  }
+
   if (has(t, "銀行|バンキング|金融|決済|勘定系|預金|為替|融資")) {
     addScore(scores, DOMAIN.FINANCIAL_SYSTEM_ENGINEER, 45, "financial system evidence");
   }
