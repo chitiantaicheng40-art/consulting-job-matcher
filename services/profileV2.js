@@ -189,7 +189,7 @@ function normalizeCandidateProfileV2(candidate) {
     evidence.push("ITデリバリー/設計開発/顧客折衝経験を検出");
   }
 
-  if (has(text, /PM|PL|リーダー|マネジメント|チームリード|プロジェクト管理/i)) {
+  if (has(text, /\bPM\b|\bPMO\b|\bPL\b|プロジェクトマネージャー|プロジェクトリーダー|チームリード|プロジェクト管理|プロジェクトマネジメント/i)) {
     roleCategories.add("PM_PL");
     evidence.push("PM/PL系経験を検出");
   }
@@ -231,7 +231,7 @@ function normalizeCandidateProfileV2(candidate) {
     productLevels.security = "none";
   }
 
-  const strictPm = /PM|プロジェクトマネージャー|PL|プロジェクトリーダー|チームリード|進捗管理|課題管理|メンバー管理|マネジメント経験/i.test(text);
+  const strictPm = /\bPM\b|\bPMO\b|\bPL\b|プロジェクトマネージャー|プロジェクトリーダー|チームリード|プロジェクト管理|プロジェクトマネジメント/i.test(text);
   const onlyMember = /メンバー\s*\/\s*PJ要員|メンバー\/PJ要員/i.test(text);
   if (!strictPm || onlyMember) {
     roleCategories.delete("PM_PL");
@@ -344,7 +344,7 @@ function classifyJobProfileV2(jobOrProfile) {
     categories.add("IT_CONSULT_DELIVERY");
   }
 
-  if (has(text, /PM|PMO|PL|プロジェクト管理|マネジメント/i)) {
+  if (has(text, /\bPM\b|\bPMO\b|\bPL\b|プロジェクトマネージャー|プロジェクトリーダー|プロジェクト管理|プロジェクトマネジメント/i)) {
     categories.add("PM_PL");
   }
 

@@ -69,7 +69,7 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
     addScore(scores, DOMAIN.JAVA_WEB_APP_ENGINEER, 50, "Java/Web app evidence");
   }
 
-  if (has(t, "GIS|ArcGIS|データ分析|データ可視化|可視化|データ統合|SQL|BI|DWH|ETL|分析")) {
+  if (has(t, "GIS|ArcGIS|データ分析|データ可視化|データ統合|SQL|BI|DWH|ETL")) {
     addScore(scores, DOMAIN.AI_DATA_ENGINEER, 45, "data/GIS analytics evidence");
   }
 

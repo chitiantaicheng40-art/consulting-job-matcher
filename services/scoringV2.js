@@ -618,7 +618,7 @@ function scoreJob(candidate, job, cachedProfile) {
 
   // Senior manager / manager class caps.
   const isSeniorManagerJob = has(jobText, "シニアマネジャー|シニアマネージャー|マネジャー|マネージャー|Manager");
-  const hasManagerExperience = cCats.has("PM_PL") || cCats.has("PMO") || has(cText, "プロジェクトマネージャー|プロジェクトリーダー|チームリード|マネジメント経験|管理経験");
+  const hasManagerExperience = cCats.has("PM_PL") || cCats.has("PMO") || has(cText, "プロジェクトマネージャー|プロジェクトリーダー|チームリード|プロジェクト管理|プロジェクトマネジメント");
   if (isSeniorManagerJob && (!hasManagerExperience || years < 5)) {
     cap = Math.min(cap, 30);
     notes.push("マネジャー/シニアマネジャー求人だが候補者の管理経験・年数が不足");
@@ -735,7 +735,7 @@ function scoreJob(candidate, job, cachedProfile) {
 
   const hasConsultingOrLeadEvidence =
     cCats.has("PM_PL") ||
-    has(cText, "プロジェクトリード|リーダー|PL|PM|プロジェクトマネジメント|マネジメント|コンサルティング|戦略|構想策定|経営|業務改革|組織マネジメント");
+    has(cText, "プロジェクトリード|プロジェクトリーダー|チームリード|\\bPL\\b|\\bPM\\b|プロジェクトマネジメント|プロジェクト管理|コンサルティング|戦略|構想策定|経営|業務改革|組織マネジメント");
 
   if (
     isAiDataCloudCandidate &&
