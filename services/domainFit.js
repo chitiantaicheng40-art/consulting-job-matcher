@@ -72,7 +72,16 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
     addScore(scores, DOMAIN.FINANCIAL_SYSTEM_ENGINEER, 45, "financial system evidence");
   }
 
-  if (has(t, "メインフレーム|PL/I|PLI|COBOL|JCL|バッチ処理|オンライン処理|勘定系|基幹システム|夜間バッチ|ジョブスケジューラ|保守・運用|障害対応|次期システム")) {
+  const hasMainframeStrongEvidence = has(
+    t,
+    "メインフレーム|PL/I|PLI|COBOL|JCL|ホスト|勘定系|夜間バッチ"
+  );
+
+  const hasLegacyBankingCombo =
+    has(t, "銀行向け|預金|為替|融資") &&
+    has(t, "基幹システム|バッチ処理|オンライン処理|ジョブスケジューラ|次期システム|移行");
+
+  if (hasMainframeStrongEvidence || hasLegacyBankingCombo) {
     addScore(scores, DOMAIN.MAINFRAME_LEGACY_ENGINEER, 70, "mainframe/legacy banking evidence");
   }
 
