@@ -724,10 +724,18 @@ function buildMatchesV2(candidate, jobs, options = {}) {
 
     // Absolute final output guard:
     // Unreal / Unity / realtime creative engine roles must not be matched by generic software development.
-    if (
-      has(jobSideText, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR") &&
-      !has(cText, "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR")
-    ) {
+    // Hard cap it unless the candidate profile explicitly has a game/realtime engine signal.
+    const hasRealtimeEngineJob = has(
+      jobSideText,
+      "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR"
+    );
+
+    const hasRealtimeEngineCandidate = has(
+      cText,
+      "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR"
+    );
+
+    if (hasRealtimeEngineJob && !hasRealtimeEngineCandidate) {
       score = Math.min(score, 25);
       extraNotes.push("最終補正：Unreal/Unity/3DCG/リアルタイム開発求人だが候補者に該当経験なし");
 
@@ -753,7 +761,8 @@ function buildMatchesV2(candidate, jobs, options = {}) {
       has(cText, "OJT|新人教育|新人業務サポート|進捗管理|業務割り振り|要員管理") &&
       !hasRealPmPlEvidence;
 
-    if (onlyOjtManagement) {
+    // For junior candidates, PM_PL/PMO should not remain from OJT/newcomer support.
+    if (onlyOjtManagement || candidateYears(candidate) < 4) {
       if (Array.isArray(m.keywordMatched)) {
         m.keywordMatched = m.keywordMatched.filter(x => x !== "PM_PL" && x !== "PMO");
       }
@@ -768,7 +777,7 @@ function buildMatchesV2(candidate, jobs, options = {}) {
 
       if (has(jobSideText, "PMO|プロジェクト管理|プロジェクトマネジメント|ITマネジメント|マネジメント能力|大規模プロジェクト|リーダークラス")) {
         score = Math.min(score, 52);
-        extraNotes.push("最終補正：OJT指導はあるが、PM/PL本職経験ではないためPM/マネジメント求人は上限52");
+        extraNotes.push("最終補正：若手候補者のため、PM/PL/マネジメント求人は上限52");
       }
     }
 
