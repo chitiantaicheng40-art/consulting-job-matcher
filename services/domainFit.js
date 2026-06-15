@@ -108,7 +108,7 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
   }
 
   if (cats.has("SALESFORCE_CRM") || products.salesforce === "implementation") {
-    addScore(scores, DOMAIN.SALESFORCE_CRM, 85, "Salesforce implementation");
+    addScore(scores, DOMAIN.SALESFORCE_CRM, 120, "Salesforce implementation");
   }
 
   if (cats.has("SAP_SPECIALIST") || products.sap === "implementation") {
