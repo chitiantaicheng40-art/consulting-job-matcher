@@ -23,6 +23,7 @@ function arr(value) {
 const DOMAIN = {
   JAVA_WEB_APP_ENGINEER: "JAVA_WEB_APP_ENGINEER",
   FINANCIAL_SYSTEM_ENGINEER: "FINANCIAL_SYSTEM_ENGINEER",
+  MAINFRAME_LEGACY_ENGINEER: "MAINFRAME_LEGACY_ENGINEER",
   JUNIOR_IT_DELIVERY: "JUNIOR_IT_DELIVERY",
   IT_CONSULTING: "IT_CONSULTING",
   STRATEGY_ARCHITECTURE: "STRATEGY_ARCHITECTURE",
@@ -67,12 +68,18 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
     addScore(scores, DOMAIN.JAVA_WEB_APP_ENGINEER, 50, "Java/Web app evidence");
   }
 
-  if (has(t, "銀行|バンキング|金融|決済|勘定系")) {
+  if (has(t, "銀行|バンキング|金融|決済|勘定系|預金|為替|融資")) {
     addScore(scores, DOMAIN.FINANCIAL_SYSTEM_ENGINEER, 45, "financial system evidence");
   }
 
+  if (has(t, "メインフレーム|PL/I|PLI|COBOL|JCL|バッチ処理|オンライン処理|勘定系|基幹システム|夜間バッチ|ジョブスケジューラ|保守・運用|障害対応|次期システム")) {
+    addScore(scores, DOMAIN.MAINFRAME_LEGACY_ENGINEER, 70, "mainframe/legacy banking evidence");
+  }
+
+  // Do not convert generic SOFTWARE_ENGINEER into JAVA_WEB_APP_ENGINEER.
+  // Java/Web needs explicit Java/JavaScript/React/Web evidence.
   if (cats.has("SOFTWARE_ENGINEER")) {
-    addScore(scores, DOMAIN.JAVA_WEB_APP_ENGINEER, 25, "SOFTWARE_ENGINEER category");
+    addScore(scores, DOMAIN.JUNIOR_IT_DELIVERY, 20, "SOFTWARE_ENGINEER generic delivery category");
   }
 
   if (cats.has("IT_CONSULT_DELIVERY") || has(t, "基本設計|詳細設計|開発|テスト|保守|運用")) {
@@ -158,7 +165,11 @@ function classifyJobDomain(jobText, jobProfileV2) {
   }
 
   // Consulting / delivery domains.
-  if (has(titleAndReq, "金融プラットフォーム|銀行|バンキング|金融|決済")) {
+  if (has(titleAndReq, "メインフレーム|PL/I|PLI|COBOL|JCL|勘定系|基幹システム|レガシー|ホスト|バッチ処理|オンライン処理|モダナイゼーション|マイグレーション")) {
+    addScore(scores, DOMAIN.MAINFRAME_LEGACY_ENGINEER, 90, "mainframe/legacy modernization evidence");
+  }
+
+  if (has(titleAndReq, "金融プラットフォーム|銀行|バンキング|金融|決済|勘定系")) {
     addScore(scores, DOMAIN.FINANCIAL_SYSTEM_ENGINEER, 80, "financial platform evidence");
   }
 
@@ -190,7 +201,8 @@ function classifyJobDomain(jobText, jobProfileV2) {
     .filter(([domain, value]) => {
       if (value.score < 70) return false;
 
-      if (primary === DOMAIN.FINANCIAL_SYSTEM_ENGINEER && [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.IT_CONSULTING].includes(domain)) return true;
+      if (primary === DOMAIN.FINANCIAL_SYSTEM_ENGINEER && [DOMAIN.MAINFRAME_LEGACY_ENGINEER, DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.IT_CONSULTING].includes(domain)) return true;
+      if (primary === DOMAIN.MAINFRAME_LEGACY_ENGINEER && [DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.IT_CONSULTING].includes(domain)) return true;
       if (primary === DOMAIN.JAVA_WEB_APP_ENGINEER && [DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.IT_CONSULTING].includes(domain)) return true;
       if (primary === DOMAIN.STRATEGY_ARCHITECTURE && [DOMAIN.IT_CONSULTING, DOMAIN.PMO_PM].includes(domain)) return true;
       if (primary === DOMAIN.PMO_PM && [DOMAIN.IT_CONSULTING, DOMAIN.STRATEGY_ARCHITECTURE].includes(domain)) return true;
@@ -210,7 +222,8 @@ function domainDistance(candidateDomains, jobDomains) {
   if (c.has(primaryJob)) return "same";
 
   const nearMap = {
-    [DOMAIN.FINANCIAL_SYSTEM_ENGINEER]: [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY, DOMAIN.IT_CONSULTING],
+    [DOMAIN.FINANCIAL_SYSTEM_ENGINEER]: [DOMAIN.MAINFRAME_LEGACY_ENGINEER, DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY, DOMAIN.IT_CONSULTING],
+    [DOMAIN.MAINFRAME_LEGACY_ENGINEER]: [DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY, DOMAIN.IT_CONSULTING],
     [DOMAIN.JAVA_WEB_APP_ENGINEER]: [DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY, DOMAIN.IT_CONSULTING],
     [DOMAIN.IT_CONSULTING]: [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY],
     [DOMAIN.STRATEGY_ARCHITECTURE]: [DOMAIN.IT_CONSULTING, DOMAIN.JUNIOR_IT_DELIVERY],
@@ -225,6 +238,7 @@ function domainDistance(candidateDomains, jobDomains) {
 
   const specialistDomains = [
     DOMAIN.REALTIME_3D_ENGINEER,
+    DOMAIN.MAINFRAME_LEGACY_ENGINEER,
     DOMAIN.AI_DATA_ENGINEER,
     DOMAIN.EMBEDDED_IOT_ENGINEER,
     DOMAIN.SALESFORCE_CRM,
