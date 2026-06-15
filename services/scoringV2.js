@@ -735,6 +735,34 @@ function scoreJob(candidate, job, cachedProfile) {
       (cCats.has("ORACLE_ERP") && has(jobText, "Oracle ERP|Oracle Fusion"))
     );
 
+  // Weak requirement cap: jobs whose must-have is only interest/willingness should not dominate the top.
+  if (
+    requiredTotal > 0 &&
+    requiredMatched.length > 0 &&
+    requiredMatched.join(" ").match(/興味がある|関心がある|意欲|学習意欲|キャッチアップ意欲|挑戦したい|志向/i)
+  ) {
+    cap = Math.min(cap, 78);
+    notes.push("必須条件が興味・意欲中心のため、上限78");
+  }
+
+  // AI/Data specialist jobs require strong AI/Data primary evidence.
+  if (
+    has(jobText, "AIエンジニア|AIアーキテクト|Data＆AI|Data&AI|データサイエンティスト|データ活用コンサルタント|機械学習|LLM|生成AI") &&
+    !cCats.has("AI_ENGINEER")
+  ) {
+    cap = Math.min(cap, 68);
+    notes.push("AI/Data専門求人だが候補者にAI実装・専門職経験が弱いため上限68");
+  }
+
+  // HR / People / HCM strategy jobs require HR-domain experience.
+  if (
+    has(jobText, "人的資本|People|Culture|人事戦略|組織・人材|HRBP|人材開発|組織開発|HCM|Workday|SuccessFactors") &&
+    !has(cText, "人事|人的資本|HRBP|人材開発|組織開発|HCM|Workday|SuccessFactors|タレントマネジメント|勤怠|給与")
+  ) {
+    cap = Math.min(cap, 58);
+    notes.push("人事/人的資本領域求人だが候補者にHR領域経験なし");
+  }
+
   if (!hasStrongSpecialtyMatch && score > 78) {
     cap = Math.min(cap, 78);
     notes.push("主専門の強一致ではないため、80点以上は抑制");
