@@ -194,33 +194,6 @@ function candidateYears(candidate) {
 
 function matchRequirement(req, ctx) {
 
-  const reqTextForLifecycle = String(req || "");
-  const candTextForLifecycle = [
-    ctx?.candidateText,
-    ctx?.candidateProfileText,
-    ctx?.candidateProfileV2,
-    ctx?.candidate,
-    ctx?.text,
-    ctx?.skills,
-    ctx?.roleCategories
-  ].map(x => {
-    if (x == null) return "";
-    if (typeof x === "string") return x;
-    try { return JSON.stringify(x); } catch (_) { return String(x); }
-  }).join(" ");
-
-  // Generic IT lifecycle requirement:
-  // Example: "IT戦略、企画、構築、運用保守などのITライフサイクルに関わる実務経験"
-  // This should match practical lifecycle experience such as requirements, design,
-  // implementation, testing, maintenance/operations, incident response, and migration.
-  if (
-    /ITライフサイクル|企画、構築、運用保守|構築、運用保守|運用保守などのITライフサイクル/.test(reqTextForLifecycle) &&
-    /(要件定義|基本設計|詳細設計|設計|実装|製造|開発|単体テスト|結合テスト|テスト|保守|運用|運用保守|障害対応|改修|リリース|移行|次期システム|システム開発|基幹システム|勘定系|バッチ処理|オンライン処理)/.test(candTextForLifecycle)
-  ) {
-    return true;
-  }
-
-
   const r = req || "";
   const cText = ctx.cText;
   const cp = ctx.cp || {};
@@ -229,6 +202,13 @@ function matchRequirement(req, ctx) {
   const years = ctx.years;
 
   if (!r.trim()) return false;
+
+  if (
+    has(r, "ITライフサイクル|企画、構築、運用保守|構築、運用保守|運用保守などのITライフサイクル|SDLC|Systems Development Life Cycle") &&
+    has(cText, "要件定義|基本設計|詳細設計|設計|実装|製造|開発|単体テスト|結合テスト|テスト|保守|運用|運用保守|保守・運用|障害対応|改修|リリース|移行|次期システム|システム開発|基幹システム|勘定系|バッチ処理|オンライン処理")
+  ) {
+    return true;
+  }
 
   // Specific product/domain requirements must be judged before generic "開発/設計/テスト".
   // Otherwise "Unreal Engineを活用したコンテンツ開発経験" is wrongly matched by generic development experience.
