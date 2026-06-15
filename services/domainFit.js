@@ -31,6 +31,7 @@ const DOMAIN = {
   REALTIME_3D_ENGINEER: "REALTIME_3D_ENGINEER",
   AI_DATA_ENGINEER: "AI_DATA_ENGINEER",
   EMBEDDED_IOT_ENGINEER: "EMBEDDED_IOT_ENGINEER",
+  CLOUD_APP_ENGINEER: "CLOUD_APP_ENGINEER",
   CLOUD_INFRA_ENGINEER: "CLOUD_INFRA_ENGINEER",
   SALESFORCE_CRM: "SALESFORCE_CRM",
   SAP_ERP: "SAP_ERP",
@@ -101,6 +102,13 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
 
   if (cats.has("AI_ENGINEER") || cats.has("DATA_SCIENCE") || products.genai === "implementation" || products.data === "implementation") {
     addScore(scores, DOMAIN.AI_DATA_ENGINEER, 60, "AI/data implementation");
+  }
+
+  if (
+    cats.has("CLOUD_APP_ENGINEER") ||
+    (has(t, "AWS|Azure|GCP|クラウド|Cloud") && has(t, "REST API|WebAPI|API実装|Webシステム|アプリ|システム開発|Python|Node.js|Go"))
+  ) {
+    addScore(scores, DOMAIN.CLOUD_APP_ENGINEER, 90, "cloud application/API implementation");
   }
 
   if (cats.has("EMBEDDED_IOT") || products.embedded === "implementation") {
@@ -259,7 +267,8 @@ function domainDistance(candidateDomains, jobDomains) {
     [DOMAIN.STRATEGY_ARCHITECTURE]: [DOMAIN.IT_CONSULTING, DOMAIN.JUNIOR_IT_DELIVERY],
     [DOMAIN.PMO_PM]: [DOMAIN.IT_CONSULTING, DOMAIN.JUNIOR_IT_DELIVERY],
     [DOMAIN.CLOUD_INFRA_ENGINEER]: [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.IT_CONSULTING],
-    [DOMAIN.AI_DATA_ENGINEER]: [DOMAIN.CLOUD_INFRA_ENGINEER],
+    [DOMAIN.AI_DATA_ENGINEER]: [DOMAIN.CLOUD_INFRA_ENGINEER, DOMAIN.CLOUD_APP_ENGINEER],
+    [DOMAIN.CLOUD_APP_ENGINEER]: [DOMAIN.AI_DATA_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY, DOMAIN.IT_CONSULTING],
     [DOMAIN.EMBEDDED_IOT_ENGINEER]: [DOMAIN.AI_DATA_ENGINEER]
   };
 
