@@ -1080,11 +1080,11 @@ function buildMatchesV2(candidate, jobs, options = {}) {
         reason: baseReason,
         documentPassReason: baseReason,
         passReason: baseReason,
-        comment: finalComment,
-        recommendation_comment: finalComment,
-        recommendationComment: finalComment,
-        matchComment: finalComment,
-        aiComment: finalComment,
+        comment: normalizeDomainFitReasonForDisplay(cp, finalComment),
+        recommendation_comment: normalizeDomainFitReasonForDisplay(cp, finalComment),
+        recommendationComment: normalizeDomainFitReasonForDisplay(cp, finalComment),
+        matchComment: normalizeDomainFitReasonForDisplay(cp, finalComment),
+        aiComment: normalizeDomainFitReasonForDisplay(cp, finalComment),
         rankNo: i + 1,
         order: i + 1
       };
