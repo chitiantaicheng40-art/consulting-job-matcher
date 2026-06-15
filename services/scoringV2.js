@@ -4,6 +4,7 @@ const {
   normalizeCandidateProfileV2,
   classifyJobProfileV2
 } = require("./profileV2");
+const { evaluateDomainFit } = require("./domainFit");
 
 function textOf(value) {
   if (value == null) return "";
@@ -313,6 +314,14 @@ function scoreJob(candidate, job, cachedProfile) {
     textOf(preferred)
   ].join("\n");
 
+  const domainFit = evaluateDomainFit({
+    candidateProfileV2: cp,
+    candidateText: cText,
+    jobText,
+    jobProfileV2: jp,
+    years
+  });
+
   let score = 20;
   const notes = [];
   const matchedCategories = [];
@@ -423,6 +432,9 @@ function scoreJob(candidate, job, cachedProfile) {
 
   // Negative / hard mismatch caps
   let cap = 100;
+
+  cap = Math.min(cap, domainFit.cap);
+  notes.push(domainFit.reason);
 
   if (has(jobText, "AIアーキテクト|データサイエンティスト|生成AI|LLM|機械学習") && !cCats.has("AI_ENGINEER") && !cCats.has("DATA_SCIENCE")) {
     cap = Math.min(cap, 35);
@@ -630,6 +642,7 @@ function scoreJob(candidate, job, cachedProfile) {
     candidateProfileV2: cp,
     jobProfileV2: jp,
     aiJobProfile: profile,
+    domainFit,
     profileV2Scoring: {
       applied: true,
       matchedCategories,
