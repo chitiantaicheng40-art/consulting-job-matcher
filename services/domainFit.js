@@ -43,159 +43,187 @@ const DOMAIN = {
   UNKNOWN: "UNKNOWN"
 };
 
+function addScore(scores, domain, points, evidence) {
+  if (!scores[domain]) scores[domain] = { score: 0, evidence: [] };
+  scores[domain].score += points;
+  if (evidence) scores[domain].evidence.push(evidence);
+}
+
+function topDomains(scores, max = 2) {
+  return Object.entries(scores)
+    .sort((a, b) => b[1].score - a[1].score)
+    .filter(([, v]) => v.score > 0)
+    .slice(0, max)
+    .map(([k]) => k);
+}
+
 function classifyCandidateDomain(candidateProfileV2, candidateText) {
   const cats = new Set(arr(candidateProfileV2?.roleCategories));
   const products = candidateProfileV2?.productLevels || {};
   const t = candidateText || "";
+  const scores = {};
 
-  const domains = [];
-
-  if (
-    has(t, "Java|JavaScript|React|Spring|Oracle|MySQL|フロントエンド|バックエンド|Web") ||
-    cats.has("SOFTWARE_ENGINEER")
-  ) {
-    domains.push(DOMAIN.JAVA_WEB_APP_ENGINEER);
+  if (has(t, "Java|JavaScript|React|Spring|フロントエンド|バックエンド|Webアプリ|オープン系")) {
+    addScore(scores, DOMAIN.JAVA_WEB_APP_ENGINEER, 50, "Java/Web app evidence");
   }
 
   if (has(t, "銀行|バンキング|金融|決済|勘定系")) {
-    domains.push(DOMAIN.FINANCIAL_SYSTEM_ENGINEER);
+    addScore(scores, DOMAIN.FINANCIAL_SYSTEM_ENGINEER, 45, "financial system evidence");
+  }
+
+  if (cats.has("SOFTWARE_ENGINEER")) {
+    addScore(scores, DOMAIN.JAVA_WEB_APP_ENGINEER, 25, "SOFTWARE_ENGINEER category");
   }
 
   if (cats.has("IT_CONSULT_DELIVERY") || has(t, "基本設計|詳細設計|開発|テスト|保守|運用")) {
-    domains.push(DOMAIN.JUNIOR_IT_DELIVERY);
+    addScore(scores, DOMAIN.JUNIOR_IT_DELIVERY, 25, "IT delivery evidence");
   }
 
   if (cats.has("AI_ENGINEER") || cats.has("DATA_SCIENCE") || products.genai === "implementation" || products.data === "implementation") {
-    domains.push(DOMAIN.AI_DATA_ENGINEER);
+    addScore(scores, DOMAIN.AI_DATA_ENGINEER, 60, "AI/data implementation");
   }
 
   if (cats.has("EMBEDDED_IOT") || products.embedded === "implementation") {
-    domains.push(DOMAIN.EMBEDDED_IOT_ENGINEER);
-  }
-
-  if (cats.has("CLOUD_INFRA")) {
-    domains.push(DOMAIN.CLOUD_INFRA_ENGINEER);
+    addScore(scores, DOMAIN.EMBEDDED_IOT_ENGINEER, 60, "embedded implementation");
   }
 
   if (cats.has("SALESFORCE_CRM") || products.salesforce === "implementation") {
-    domains.push(DOMAIN.SALESFORCE_CRM);
+    addScore(scores, DOMAIN.SALESFORCE_CRM, 60, "Salesforce implementation");
   }
 
   if (cats.has("SAP_SPECIALIST") || products.sap === "implementation") {
-    domains.push(DOMAIN.SAP_ERP);
+    addScore(scores, DOMAIN.SAP_ERP, 60, "SAP implementation");
   }
 
   if (cats.has("ORACLE_ERP") || products.oracle === "implementation") {
-    domains.push(DOMAIN.ORACLE_ERP);
+    addScore(scores, DOMAIN.ORACLE_ERP, 60, "Oracle ERP implementation");
   }
 
-  if (cats.has("SECURITY") || products.security === "implementation") {
-    domains.push(DOMAIN.SECURITY);
-  }
-
-  if (cats.has("SALES_ALLIANCE") || products.sales === "confirmed") {
-    domains.push(DOMAIN.SALES);
-  }
-
-  return [...new Set(domains.length ? domains : [DOMAIN.UNKNOWN])];
+  const domains = topDomains(scores, 3);
+  return domains.length ? domains : [DOMAIN.UNKNOWN];
 }
 
 function classifyJobDomain(jobText, jobProfileV2) {
-  const cats = new Set(arr(jobProfileV2?.roleCategories));
-  const req = jobProfileV2?.productRequirements || {};
   const t = jobText || "";
-  const domains = [];
+  const titleAndReq = t;
+  const scores = {};
 
-  if (has(t, "Unreal|Unity|リアルタイムソフトウェア|3DCG|XR|VR|AR|ゲーム")) {
-    domains.push(DOMAIN.REALTIME_3D_ENGINEER);
+  // Very specific product / specialty domains.
+  if (has(titleAndReq, "リアルタイムソフトウェアデベロッパー|Unreal\\s*Engine|Unity|3DCG|XR|VR|AR|ゲーム")) {
+    addScore(scores, DOMAIN.REALTIME_3D_ENGINEER, 100, "realtime/3D engine requirement");
   }
 
-  if (has(t, "AIエンジニア|AIアーキテクト|生成AI|LLM|機械学習|データサイエンティスト|データドリブン") || cats.has("AI_ENGINEER") || cats.has("DATA_SCIENCE")) {
-    domains.push(DOMAIN.AI_DATA_ENGINEER);
+  if (has(titleAndReq, "AIエンジニア|AIアーキテクト|生成AI|LLM|機械学習|データサイエンティスト|データ分析基盤")) {
+    addScore(scores, DOMAIN.AI_DATA_ENGINEER, 95, "AI/data role evidence");
   }
 
-  if (has(t, "組み込み|組込み|車載|ECU|IoT|QNX|GPIO|I2C") || cats.has("EMBEDDED_IOT")) {
-    domains.push(DOMAIN.EMBEDDED_IOT_ENGINEER);
+  if (has(titleAndReq, "組み込み|組込み|車載|ECU|IoT|QNX|GPIO|I2C")) {
+    addScore(scores, DOMAIN.EMBEDDED_IOT_ENGINEER, 95, "embedded/IoT evidence");
   }
 
-  if (has(t, "Salesforce|CRM|CX") || cats.has("SALESFORCE_CRM") || req.salesforce) {
-    domains.push(DOMAIN.SALESFORCE_CRM);
+  if (has(titleAndReq, "Salesforce|CRM|CX")) {
+    addScore(scores, DOMAIN.SALESFORCE_CRM, 90, "Salesforce/CRM evidence");
   }
 
-  if (has(t, "SAP|S/4HANA|ABAP|Basis|Ariba|SuccessFactors") || cats.has("SAP_SPECIALIST") || req.sap) {
-    domains.push(DOMAIN.SAP_ERP);
+  if (has(titleAndReq, "SAP|S/4HANA|ABAP|Basis|Ariba|SuccessFactors")) {
+    addScore(scores, DOMAIN.SAP_ERP, 90, "SAP evidence");
   }
 
-  if (has(t, "Oracle ERP|Oracle Fusion|Oracle Cloud ERP|EPM|SCM Cloud|HCM Cloud") || cats.has("ORACLE_ERP") || req.oracle) {
-    domains.push(DOMAIN.ORACLE_ERP);
+  if (has(titleAndReq, "Oracle ERP|Oracle Fusion|Oracle Cloud ERP|EPM|Oracle SCM|Oracle HCM")) {
+    addScore(scores, DOMAIN.ORACLE_ERP, 90, "Oracle ERP evidence");
   }
 
-  if (has(t, "ServiceNow|Workday|SuccessFactors|人事|HCM|Employee Workflows")) {
-    domains.push(DOMAIN.HR_TECH);
+  if (has(titleAndReq, "Dynamics 365|Power Platform|Microsoft リーダークラス")) {
+    addScore(scores, DOMAIN.ORACLE_ERP, 75, "enterprise package evidence");
   }
 
-  if (has(t, "SCM|Supply Chain|サプライチェーン|物流|調達|購買|生産管理")) {
-    domains.push(DOMAIN.SCM);
+  if (has(titleAndReq, "ServiceNow|Workday|人事|HCM|Employee Workflows")) {
+    addScore(scores, DOMAIN.HR_TECH, 85, "HR tech evidence");
   }
 
-  if (has(t, "セキュリティ|Security|SOC|CSIRT|脆弱性|ゼロトラスト")) {
-    domains.push(DOMAIN.SECURITY);
+  if (has(titleAndReq, "SCM|Supply Chain|サプライチェーン|物流|調達|購買|生産管理")) {
+    addScore(scores, DOMAIN.SCM, 85, "SCM evidence");
   }
 
-  if (has(t, "法人営業|プリセールス|リセール|製品販売|テクノロジーセールス|アライアンス")) {
-    domains.push(DOMAIN.SALES);
+  if (has(titleAndReq, "セキュリティ|Security|SOC|CSIRT|脆弱性|ゼロトラスト")) {
+    addScore(scores, DOMAIN.SECURITY, 85, "security evidence");
   }
 
-  if (has(t, "広報|PR|広告代理店|メディア|ソーシャルメディア|マーケティング|コーポレート職")) {
-    domains.push(DOMAIN.PR_MARKETING);
+  if (has(titleAndReq, "法人営業|プリセールス|リセール|製品販売|テクノロジーセールス|アライアンス")) {
+    addScore(scores, DOMAIN.SALES, 85, "sales evidence");
   }
 
-  if (has(t, "PMO|プロジェクト管理|プロジェクトマネジメント|大規模プロジェクト|プログラム管理|マネジメント能力")) {
-    domains.push(DOMAIN.PMO_PM);
+  if (has(titleAndReq, "広報|PR|広告代理店|メディア|マーケティング|コーポレート職")) {
+    addScore(scores, DOMAIN.PR_MARKETING, 85, "PR/marketing evidence");
   }
 
-  if (has(t, "IT戦略|IT企画|構想策定|アーキテクチャ|Architecture|Transformation|ビジネスアーキテクチャ|CPO")) {
-    domains.push(DOMAIN.STRATEGY_ARCHITECTURE);
+  // Consulting / delivery domains.
+  if (has(titleAndReq, "金融プラットフォーム|銀行|バンキング|金融|決済")) {
+    addScore(scores, DOMAIN.FINANCIAL_SYSTEM_ENGINEER, 80, "financial platform evidence");
   }
 
-  if (has(t, "Java|JavaScript|React|Spring|Webアプリ|フロントエンド|バックエンド|オープン系開発|システム設計・開発")) {
-    domains.push(DOMAIN.JAVA_WEB_APP_ENGINEER);
+  if (has(titleAndReq, "Java|JavaScript|React|Spring|Web系開発|Webアプリ|フロントエンド|バックエンド|オープン系開発")) {
+    addScore(scores, DOMAIN.JAVA_WEB_APP_ENGINEER, 75, "Java/Web development evidence");
   }
 
-  if (has(t, "銀行|バンキング|金融|決済|金融プラットフォーム")) {
-    domains.push(DOMAIN.FINANCIAL_SYSTEM_ENGINEER);
+  if (has(titleAndReq, "PMO|プロジェクト管理|プロジェクトマネジメント|大規模プロジェクト|プログラム管理|マネジメント能力|リーダークラス")) {
+    addScore(scores, DOMAIN.PMO_PM, 70, "PM/PMO evidence");
   }
 
-  if (has(t, "システム開発|要件定義|基本設計|詳細設計|テスト|保守|運用|モダナイゼーション|AMO")) {
-    domains.push(DOMAIN.IT_CONSULTING);
+  if (has(titleAndReq, "IT戦略|IT企画|構想策定|アーキテクチャ|Architecture|Transformation|ビジネスアーキテクチャ|CPO|TAT")) {
+    addScore(scores, DOMAIN.STRATEGY_ARCHITECTURE, 70, "strategy/architecture evidence");
   }
 
-  return [...new Set(domains.length ? domains : [DOMAIN.GENERAL_IT])];
+  if (has(titleAndReq, "システム開発|要件定義|基本設計|詳細設計|テスト|保守|運用|モダナイゼーション|AMO|ITライフサイクル")) {
+    addScore(scores, DOMAIN.IT_CONSULTING, 55, "IT consulting/delivery evidence");
+  }
+
+  const ranked = Object.entries(scores).sort((a, b) => b[1].score - a[1].score);
+  if (!ranked.length) return [DOMAIN.GENERAL_IT];
+
+  const primary = ranked[0][0];
+
+  // Keep only closely supportive domains.
+  // Do not keep every detected keyword. This is the key anti-itachi rule.
+  const secondary = ranked
+    .slice(1)
+    .filter(([domain, value]) => {
+      if (value.score < 70) return false;
+
+      if (primary === DOMAIN.FINANCIAL_SYSTEM_ENGINEER && [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.IT_CONSULTING].includes(domain)) return true;
+      if (primary === DOMAIN.JAVA_WEB_APP_ENGINEER && [DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.IT_CONSULTING].includes(domain)) return true;
+      if (primary === DOMAIN.STRATEGY_ARCHITECTURE && [DOMAIN.IT_CONSULTING, DOMAIN.PMO_PM].includes(domain)) return true;
+      if (primary === DOMAIN.PMO_PM && [DOMAIN.IT_CONSULTING, DOMAIN.STRATEGY_ARCHITECTURE].includes(domain)) return true;
+
+      return false;
+    })
+    .slice(0, 1)
+    .map(([domain]) => domain);
+
+  return [primary, ...secondary];
 }
 
 function domainDistance(candidateDomains, jobDomains) {
   const c = new Set(candidateDomains);
-  const j = new Set(jobDomains);
+  const primaryJob = jobDomains[0];
 
-  for (const d of jobDomains) {
-    if (c.has(d)) return "same";
-  }
+  if (c.has(primaryJob)) return "same";
 
-  const nearPairs = [
-    [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.FINANCIAL_SYSTEM_ENGINEER],
-    [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.IT_CONSULTING],
-    [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY],
-    [DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.IT_CONSULTING],
-    [DOMAIN.JUNIOR_IT_DELIVERY, DOMAIN.IT_CONSULTING],
-    [DOMAIN.AI_DATA_ENGINEER, DOMAIN.CLOUD_INFRA_ENGINEER],
-    [DOMAIN.EMBEDDED_IOT_ENGINEER, DOMAIN.AI_DATA_ENGINEER]
-  ];
+  const nearMap = {
+    [DOMAIN.FINANCIAL_SYSTEM_ENGINEER]: [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY, DOMAIN.IT_CONSULTING],
+    [DOMAIN.JAVA_WEB_APP_ENGINEER]: [DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY, DOMAIN.IT_CONSULTING],
+    [DOMAIN.IT_CONSULTING]: [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.FINANCIAL_SYSTEM_ENGINEER, DOMAIN.JUNIOR_IT_DELIVERY],
+    [DOMAIN.STRATEGY_ARCHITECTURE]: [DOMAIN.IT_CONSULTING, DOMAIN.JUNIOR_IT_DELIVERY],
+    [DOMAIN.PMO_PM]: [DOMAIN.IT_CONSULTING, DOMAIN.JUNIOR_IT_DELIVERY],
+    [DOMAIN.CLOUD_INFRA_ENGINEER]: [DOMAIN.JAVA_WEB_APP_ENGINEER, DOMAIN.IT_CONSULTING],
+    [DOMAIN.AI_DATA_ENGINEER]: [DOMAIN.CLOUD_INFRA_ENGINEER],
+    [DOMAIN.EMBEDDED_IOT_ENGINEER]: [DOMAIN.AI_DATA_ENGINEER]
+  };
 
-  for (const [a, b] of nearPairs) {
-    if ((c.has(a) && j.has(b)) || (c.has(b) && j.has(a))) return "near";
-  }
+  const nearCandidates = nearMap[primaryJob] || [];
+  if (nearCandidates.some(d => c.has(d))) return "near";
 
-  const farJobDomains = [
+  const specialistDomains = [
     DOMAIN.REALTIME_3D_ENGINEER,
     DOMAIN.AI_DATA_ENGINEER,
     DOMAIN.EMBEDDED_IOT_ENGINEER,
@@ -209,11 +237,9 @@ function domainDistance(candidateDomains, jobDomains) {
     DOMAIN.PR_MARKETING
   ];
 
-  for (const d of farJobDomains) {
-    if (j.has(d) && !c.has(d)) return "far";
-  }
+  if (specialistDomains.includes(primaryJob) && !c.has(primaryJob)) return "far";
 
-  if (j.has(DOMAIN.PMO_PM) || j.has(DOMAIN.STRATEGY_ARCHITECTURE)) return "adjacent";
+  if ([DOMAIN.PMO_PM, DOMAIN.STRATEGY_ARCHITECTURE].includes(primaryJob)) return "adjacent";
 
   return "adjacent";
 }
@@ -235,9 +261,11 @@ function evaluateDomainFit({ candidateProfileV2, candidateText, jobText, jobProf
   return {
     candidateDomains,
     jobDomains,
+    primaryCandidateDomain: candidateDomains[0],
+    primaryJobDomain: jobDomains[0],
     distance,
     cap,
-    reason: `DomainFit: candidate=${candidateDomains.join("/")}, job=${jobDomains.join("/")}, distance=${distance}, cap=${cap}`
+    reason: `DomainFit: candidate=${candidateDomains.join("/")}, primaryJob=${jobDomains[0]}, job=${jobDomains.join("/")}, distance=${distance}, cap=${cap}`
   };
 }
 
