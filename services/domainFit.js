@@ -109,7 +109,7 @@ function classifyJobDomain(jobText, jobProfileV2) {
   const scores = {};
 
   // Very specific product / specialty domains.
-  if (has(titleAndReq, "リアルタイムソフトウェアデベロッパー|Unreal\\s*Engine|Unity|3DCG|XR|VR|AR|ゲーム")) {
+  if (has(titleAndReq, "リアルタイムソフトウェアデベロッパー|リアルタイムソフトウェア|Unreal\\s*Engine|Unity|3DCG|\\bXR\\b|\\bVR\\b|\\bAR\\b|ゲーム開発")) {
     addScore(scores, DOMAIN.REALTIME_3D_ENGINEER, 100, "realtime/3D engine requirement");
   }
 
