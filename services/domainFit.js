@@ -63,13 +63,21 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
   const cats = new Set(arr(candidateProfileV2?.roleCategories));
   const products = candidateProfileV2?.productLevels || {};
   const t = candidateText || "";
+  const tWithoutSalesforceCloudProducts = t
+    .replace(/Sales Cloud/gi, "")
+    .replace(/Service Cloud/gi, "")
+    .replace(/Experience Cloud/gi, "")
+    .replace(/Marketing Cloud/gi, "")
+    .replace(/Commerce Cloud/gi, "")
+    .replace(/Data Cloud/gi, "")
+    .replace(/CRM Analytics/gi, "");
   const scores = {};
 
   if (has(t, "Java|JavaScript|React|Spring|フロントエンド|バックエンド|Webアプリ|オープン系")) {
     addScore(scores, DOMAIN.JAVA_WEB_APP_ENGINEER, 50, "Java/Web app evidence");
   }
 
-  if (has(t, "GIS|ArcGIS|データ分析|データ可視化|データ統合|SQL|BI|DWH|ETL")) {
+  if (has(tWithoutSalesforceCloudProducts, "GIS|ArcGIS|データ分析|データ可視化|データ統合|SQL|BI|DWH|ETL")) {
     addScore(scores, DOMAIN.AI_DATA_ENGINEER, 45, "data/GIS analytics evidence");
   }
 
@@ -112,7 +120,7 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
     !hasCloudStudyOnly &&
     (
       cats.has("CLOUD_APP_ENGINEER") ||
-      (has(t, "AWS|Azure|GCP|クラウド|Cloud") && has(t, "REST API|WebAPI|API実装|Webシステム|アプリ|システム開発|Python|Node.js|Go|設計|構築|運用"))
+      (has(tWithoutSalesforceCloudProducts, "AWS|Azure|GCP|クラウド|Cloud") && has(tWithoutSalesforceCloudProducts, "REST API|WebAPI|API実装|Webシステム|アプリ|システム開発|Python|Node.js|Go|設計|構築|運用"))
     )
   ) {
     addScore(scores, DOMAIN.CLOUD_APP_ENGINEER, 90, "cloud application/API implementation");
