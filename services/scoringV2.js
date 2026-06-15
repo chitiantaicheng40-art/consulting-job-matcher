@@ -795,6 +795,19 @@ function scoreJob(candidate, job, cachedProfile) {
   }
 
 
+  // Relax accidental PM cap for cloud engineering / modernization roles.
+  // Cloud engineering roles may mention large-scale projects, but should not be treated as pure PM roles
+  // when the candidate has cloud application engineering evidence.
+  if (
+    has(jobText, "クラウド|Cloud|AWS|Azure|GCP|インテグレーション|アプリケーションモダナイゼーション|モダナイゼーション|Engineering") &&
+    cCats.has("CLOUD_APP_ENGINEER") &&
+    requiredRate >= 50 &&
+    cap <= 42
+  ) {
+    cap = Math.max(cap, 58);
+    notes.push("Cloud Engineering求人のため大規模PM上限を58まで緩和");
+  }
+
   score = Math.max(0, Math.min(100, score, cap));
 
   // Final safety cap: if no structured required criteria were extracted,
