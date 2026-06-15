@@ -718,137 +718,58 @@ function buildMatchesV2(candidate, jobs, options = {}) {
 
   matches.sort((a, b) => b.score - a.score);
 
-  return matches.slice(0, limit).map((m, i) => {
-    const cText = candidateText(candidate);
+  return matches
+    .slice(0, limit)
+    .map((m, i) => {
+      const score = Math.round(Math.max(0, Math.min(100, Number(m.score || 0))));
+      const baseReason = `Profile v2共通スコアリングで${score}点と判定しました。`;
 
-    const jobSideText = [
-      textOf(m.company),
-      textOf(m.position),
-      textOf(m.title),
-      textOf(m.requiredMatched),
-      textOf(m.requiredMissing),
-      textOf(m.preferredMatched),
-      textOf(m.jobProfileV2),
-      textOf(m.aiJobProfile)
-    ].join("\n");
+      const notes = [
+        m.comment,
+        m.profileV2Scoring && Array.isArray(m.profileV2Scoring.notes) ? m.profileV2Scoring.notes.join("。") : "",
+        m.domainFit && m.domainFit.reason ? m.domainFit.reason : ""
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .split(/\s*Profile v2共通スコアリングで\d+点と判定しました。\s*/g)
+        .join(" ")
+        .split("。")
+        .map(x => x.trim())
+        .filter(Boolean);
 
-    let score = Number(m.score || 0);
-    const extraNotes = [];
+      const finalComment = [...new Set(notes)].join("。") || baseReason;
 
-    // Absolute final output guard:
-    // Unreal / Unity / realtime creative engine roles must not be matched by generic software development.
-    // Hard cap it unless the candidate profile explicitly has a game/realtime engine signal.
-    const hasRealtimeEngineJob = has(
-      jobSideText,
-      "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR"
-    );
-
-    const hasRealtimeEngineCandidate = has(
-      cText,
-      "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR"
-    );
-
-    if (hasRealtimeEngineJob && !hasRealtimeEngineCandidate) {
-      score = Math.min(score, 25);
-      extraNotes.push("最終補正：Unreal/Unity/3DCG/リアルタイム開発求人だが候補者に該当経験なし");
-
-      const falseMatched = (m.requiredMatched || []).filter(r =>
-        has(r, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR")
-      );
-
-      m.requiredMatched = (m.requiredMatched || []).filter(r =>
-        !has(r, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR")
-      );
-
-      m.requiredMissing = uniq([...(m.requiredMissing || []), ...falseMatched]);
-    }
-
-    // PM_PL / PMO final guard:
-    // OJT/newcomer support is not enough for PM/PL category in consultant matching.
-    const hasRealPmPlEvidence = has(
-      cText,
-      "プロジェクトマネージャー|プロジェクトリーダー|PMとして|PLとして|チームリード|リードエンジニア|大規模プロジェクト管理"
-    );
-
-    const onlyOjtManagement =
-      has(cText, "OJT|新人教育|新人業務サポート|進捗管理|業務割り振り|要員管理") &&
-      !hasRealPmPlEvidence;
-
-    // For junior candidates, PM_PL/PMO should not remain from OJT/newcomer support.
-    if (onlyOjtManagement || candidateYears(candidate) < 4) {
-      if (Array.isArray(m.keywordMatched)) {
-        m.keywordMatched = m.keywordMatched.filter(x => x !== "PM_PL" && x !== "PMO");
-      }
-
-      if (m.candidateProfileV2 && Array.isArray(m.candidateProfileV2.roleCategories)) {
-        m.candidateProfileV2.roleCategories = m.candidateProfileV2.roleCategories.filter(x => x !== "PM_PL" && x !== "PMO");
-      }
-
-      if (m.profileV2Scoring && Array.isArray(m.profileV2Scoring.matchedCategories)) {
-        m.profileV2Scoring.matchedCategories = m.profileV2Scoring.matchedCategories.filter(x => x !== "PM_PL" && x !== "PMO");
-      }
-
-      if (has(jobSideText, "PMO|プロジェクト管理|プロジェクトマネジメント|ITマネジメント|マネジメント能力|大規模プロジェクト|リーダークラス")) {
-        score = Math.min(score, 52);
-        extraNotes.push("最終補正：若手候補者のため、PM/PL/マネジメント求人は上限52");
-      }
-    }
-
-    if (
-      has(jobSideText, "Microsoft リーダークラス|Dynamics 365|Power Platform") &&
-      !has(cText, "Dynamics|Power Platform|Microsoft 365|Azure実務|PowerApps")
-    ) {
-      score = Math.min(score, 30);
-      extraNotes.push("最終補正：Dynamics/Power Platform求人だが候補者に該当製品経験なし");
-    }
-
-    score = Math.round(Math.max(0, Math.min(100, score)));
-
-    m.score = score;
-    if ("totalScore" in m) m.totalScore = score;
-    if ("matchScore" in m) m.matchScore = score;
-
-    m.rank = rankForScore(score);
-    m.documentPassLikelihood = passForScore(score);
-    m.documentPassPossibility = passForScore(score);
-    m.passPossibility = passForScore(score);
-    m.documentPassProbability = passForScore(score);
-    m.recommendationLevel = recommendationForScore(score);
-    m.isRecommended = score >= 35;
-
-    const commentParts = [
-      m.comment,
-      m.profileV2Scoring && Array.isArray(m.profileV2Scoring.notes) ? m.profileV2Scoring.notes.join("。") : "",
-      extraNotes.join("。")
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .split(/\s*Profile v2共通スコアリングで\d+点と判定しました。\s*/g)
-      .join(" ")
-      .split("。")
-      .map(x => x.trim())
-      .filter(Boolean);
-
-    const uniqueComment = [...new Set(commentParts)].join("。");
-    const finalComment = uniqueComment || `Profile v2共通スコアリングで${score}点と判定しました。`;
-
-    return {
+      return {
+        ...m,
+        score,
+        totalScore: score,
+        matchScore: score,
+        rank: rankForScore(score),
+        documentPassLikelihood: passForScore(score),
+        documentPassPossibility: passForScore(score),
+        passPossibility: passForScore(score),
+        documentPassProbability: passForScore(score),
+        recommendationLevel: recommendationForScore(score),
+        isRecommended: score >= 35,
+        reason: baseReason,
+        documentPassReason: baseReason,
+        passReason: baseReason,
+        comment: finalComment,
+        recommendation_comment: finalComment,
+        recommendationComment: finalComment,
+        matchComment: finalComment,
+        aiComment: finalComment,
+        rankNo: i + 1,
+        order: i + 1
+      };
+    })
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .map((m, i) => ({
       ...m,
-      comment: finalComment,
-      recommendation_comment: finalComment,
-      recommendationComment: finalComment,
-      matchComment: finalComment,
-      aiComment: finalComment,
       rankNo: i + 1,
       order: i + 1
-    };
-  })
-  .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
-  .map((m, i) => ({
-    ...m,
-    rankNo: i + 1,
-    order: i + 1
-  }));
+    }));
+
 }
 
 module.exports = {
