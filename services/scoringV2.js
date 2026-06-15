@@ -7,6 +7,41 @@ const {
 const { evaluateDomainFit } = require("./domainFit");
 
 
+
+function normalizeDomainFitReasonForDisplay(cp, reason) {
+  if (!reason || typeof reason !== "string") return reason;
+
+  const levels = cp?.experienceLevels || {};
+  const products = cp?.productLevels || {};
+  const roleCategories = new Set(cp?.roleCategories || []);
+
+  const isSalesforceCandidate =
+    roleCategories.has("SALESFORCE_CRM") ||
+    products.salesforce === "implementation" ||
+    levels.salesforce === "implementation";
+
+  if (!isSalesforceCandidate) return reason;
+
+  return reason.replace(/candidate=([^,。]+)/, (m, raw) => {
+    const domains = String(raw)
+      .split("/")
+      .map(x => x.trim())
+      .filter(Boolean)
+      .filter(domain => {
+        if (domain === "AI_DATA_ENGINEER" && levels.aiData !== "implementation") return false;
+        if (domain === "CLOUD_APP_ENGINEER" && levels.cloud !== "implementation") return false;
+        return true;
+      });
+
+    if (!domains.includes("SALESFORCE_CRM")) {
+      domains.unshift("SALESFORCE_CRM");
+    }
+
+    return `candidate=${domains.join("/")}`;
+  });
+}
+
+
 function normalizeCandidateCategoriesForScoring(cp, categories) {
   const levels = cp?.experienceLevels || {};
   const products = cp?.productLevels || {};
@@ -613,7 +648,7 @@ function scoreJob(candidate, job, cachedProfile) {
     notes.push("DomainFit距離：farのため減点");
   }
 
-  notes.push(domainFit.reason);
+  notes.push(normalizeDomainFitReasonForDisplay(cp, domainFit.reason));
 
   if (has(jobText, "AIアーキテクト|データサイエンティスト|生成AI|LLM|機械学習") && !cCats.has("AI_ENGINEER") && !cCats.has("DATA_SCIENCE")) {
     cap = Math.min(cap, 35);
