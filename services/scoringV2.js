@@ -723,6 +723,30 @@ function scoreJob(candidate, job, cachedProfile) {
     notes.push("Unreal/Unity/3DCG/リアルタイム開発求人だが候補者に該当経験なし");
   }
 
+  // AI/Data/Cloud engineering evidence alone should not make senior strategy / architect / management consulting roles A-rank.
+  // These roles require consulting, architecture leadership, business transformation, or people/project management evidence.
+  const isAiDataCloudCandidate =
+    cCats.has("AI_ENGINEER") ||
+    cCats.has("DATA_SCIENCE") ||
+    cCats.has("CLOUD_APP_ENGINEER");
+
+  const isSeniorAiConsultingJob =
+    has(jobText, "AIアーキテクト|アーキテクト|データドリブン コンサルタント|価値創造経営|経営変革|業務変革|戦略|構想|リード|マネジメント|自社組織のマネジメント|データサイエンティスト人材|コンサルタント");
+
+  const hasConsultingOrLeadEvidence =
+    cCats.has("PM_PL") ||
+    has(cText, "プロジェクトリード|リーダー|PL|PM|プロジェクトマネジメント|マネジメント|コンサルティング|戦略|構想策定|経営|業務改革|組織マネジメント");
+
+  if (
+    isAiDataCloudCandidate &&
+    isSeniorAiConsultingJob &&
+    !hasConsultingOrLeadEvidence &&
+    requiredRate >= 80
+  ) {
+    cap = Math.min(cap, 72);
+    notes.push("AI/Data/Cloud経験はあるが、戦略・アーキテクト・マネジメント色が強い求人のため上限72");
+  }
+
   // Do not allow 80+ unless the candidate clearly matches the job's main specialty.
   const hasStrongSpecialtyMatch =
     requiredRate >= 80 &&
