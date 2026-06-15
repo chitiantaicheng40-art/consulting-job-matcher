@@ -763,6 +763,32 @@ function scoreJob(candidate, job, cachedProfile) {
     notes.push("人事/人的資本領域求人だが候補者にHR領域経験なし");
   }
 
+  // Salesforce/CRM primary candidates should not be highly ranked for unrelated specialist domains.
+  if (
+    cCats.has("SALESFORCE_CRM") &&
+    !has(jobText, "Salesforce|CRM|Dynamics|MAツール|SaaSソリューション") &&
+    has(jobText, "AIエンジニア|AIアーキテクト|Data＆AI|Data&AI|データサイエンティスト|データ活用|機械学習|LLM|生成AI")
+  ) {
+    cap = Math.min(cap, 62);
+    notes.push("Salesforce/CRM主専門候補者に対してAI/Data専門求人のため上限62");
+  }
+
+  if (
+    cCats.has("SALESFORCE_CRM") &&
+    has(jobText, "人的資本|People|Culture|人事戦略|組織・人材|HRBP|人材開発|組織開発|HCM|Workday|SuccessFactors")
+  ) {
+    cap = Math.min(cap, 58);
+    notes.push("Salesforce/CRM主専門候補者に対して人事/人的資本領域求人のため上限58");
+  }
+
+  if (
+    cCats.has("SALESFORCE_CRM") &&
+    has(jobText, "金融プラットフォーム|勘定系|金融機関|銀行|保険|証券|メインフレーム|COBOL|PL/I")
+  ) {
+    cap = Math.min(cap, 58);
+    notes.push("Salesforce/CRM主専門候補者に対して金融基幹/金融PF求人のため上限58");
+  }
+
   if (!hasStrongSpecialtyMatch && score > 78) {
     cap = Math.min(cap, 78);
     notes.push("主専門の強一致ではないため、80点以上は抑制");
