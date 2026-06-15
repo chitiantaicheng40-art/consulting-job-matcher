@@ -224,8 +224,19 @@ function matchRequirement(req, ctx) {
     return has(cText, "Pega|PEGA");
   }
 
-  if (has(r, "AIエンジニア|AIアーキテクト|生成AI|LLM|機械学習|データサイエンティスト")) {
-    return cCats.has("AI_ENGINEER") || cCats.has("DATA_SCIENCE") || products.genai === "implementation";
+  if (has(r, "AIエンジニア|AIアーキテクト|LLM|機械学習|Machine Learning|AI開発|AIエンジニアリング")) {
+    return products.genai === "implementation" || cCats.has("AI_ENGINEER");
+  }
+
+  if (has(r, "生成AI|AI利活用|AI活用")) {
+    if (has(r, "実装|開発|構築|エンジニアリング")) {
+      return products.genai === "implementation" || cCats.has("AI_ENGINEER");
+    }
+    return products.genai === "implementation" || products.genai === "usage";
+  }
+
+  if (has(r, "データサイエンティスト|データ分析")) {
+    return cCats.has("DATA_SCIENCE") || products.data === "implementation";
   }
 
   if (has(r, "人事|HCM|Employee Workflows|SuccessFactors|Workday")) {
@@ -256,8 +267,19 @@ function matchRequirement(req, ctx) {
   if (has(r, "C言語")) return has(cText, "C言語|\\bC\\b");
 
   // AI / data
-  if (has(r, "AI|生成AI|LLM|機械学習|Machine Learning")) {
-    return cCats.has("AI_ENGINEER") || products.genai === "implementation";
+  if (has(r, "LLM|機械学習|Machine Learning|AIエンジニアリング|AI開発")) {
+    return products.genai === "implementation" || cCats.has("AI_ENGINEER");
+  }
+
+  if (has(r, "生成AI|AI利活用|AI活用")) {
+    if (has(r, "実装|開発|構築|エンジニアリング")) {
+      return products.genai === "implementation" || cCats.has("AI_ENGINEER");
+    }
+    return products.genai === "implementation" || products.genai === "usage";
+  }
+
+  if (has(r, "AI")) {
+    return products.genai === "implementation" || products.genai === "usage" || cCats.has("AI_ENGINEER");
   }
   if (has(r, "データ分析|データサイエン|BI|DWH|ETL|データ基盤")) {
     return cCats.has("DATA_SCIENCE") || products.data === "implementation";

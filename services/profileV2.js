@@ -106,10 +106,40 @@ function normalizeCandidateProfileV2(candidate) {
   }
 
   // AI / GenAI
+  const hasGenAiImplementation = has(
+    text,
+    /RAG|LangChain|LangGraph|LLM.*(実装|開発|構築|アプリ)|生成AI.*(実装|開発|構築|アプリ|システム)|AIエージェント.*(実装|開発|構築)|機械学習モデル|モデル開発|MLOps|ファインチューニング|ベクトルDB|Vector DB|プロンプトエンジニアリング.*(実装|開発)/i
+  );
+
+  const hasGenAiResearch = has(
+    text,
+    /生成AI.*(調査|動向|キャッチアップ|資料|報告書|情報収集)|AI.*(調査|動向|キャッチアップ|資料|報告書|情報収集)|技術キャッチアップ|経営報告書/i
+  );
+
+  const hasGenAiUsage = has(
+    text,
+    /ChatGPT|Copilot|プロンプト|生成AI.*(活用|利用|業務利用)|AI.*(活用|利用|業務利用)/i
+  );
+
   if (has(text, /生成AI|LLM|LangChain|LangGraph|プロンプト|機械学習|Machine Learning|画像認識|G検定|AI/i)) {
-    roleCategories.add("AI_ENGINEER");
-    productLevels.genai = has(text, /生成AI|LLM|LangChain|LangGraph|プロンプト/i) ? "implementation" : "user";
-    evidence.push("生成AI/AI/機械学習関連経験を検出");
+    if (hasGenAiImplementation) {
+      roleCategories.add("AI_ENGINEER");
+      productLevels.genai = "implementation";
+      evidence.push("生成AI/AI実装経験を検出");
+    } else if (hasGenAiResearch) {
+      productLevels.genai = "research";
+      evidence.push("生成AI/AIの調査・キャッチアップ経験を検出");
+    } else if (hasGenAiUsage) {
+      productLevels.genai = "usage";
+      evidence.push("生成AI/AIツール活用経験を検出");
+    } else if (has(text, /機械学習|Machine Learning|画像認識/i)) {
+      roleCategories.add("AI_ENGINEER");
+      productLevels.genai = "implementation";
+      evidence.push("AI/機械学習関連経験を検出");
+    } else {
+      productLevels.genai = "usage";
+      evidence.push("生成AI/AI関連経験を検出");
+    }
   }
 
   // Data science
