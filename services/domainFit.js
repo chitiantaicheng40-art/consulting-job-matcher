@@ -343,3 +343,52 @@ module.exports = {
   classifyJobDomain,
   evaluateDomainFit
 };
+
+// Final output cleanup wrapper.
+// Salesforce product names such as Sales Cloud / Service Cloud / Data Cloud
+// are not generic cloud application or AI/Data engineering evidence.
+if (!module.exports.__finalSalesforceOutputCleanupWrapped) {
+  const __baseClassifyCandidateDomain = module.exports.classifyCandidateDomain;
+
+  module.exports.classifyCandidateDomain = function finalSalesforceOutputCleanup(candidateProfileV2, candidateText) {
+    const result = __baseClassifyCandidateDomain(candidateProfileV2, candidateText);
+
+    const text = candidateText || "";
+    const cleanText = text
+      .replace(/Salesforce/gi, "")
+      .replace(/Sales Cloud/gi, "")
+      .replace(/Service Cloud/gi, "")
+      .replace(/Experience Cloud/gi, "")
+      .replace(/Marketing Cloud/gi, "")
+      .replace(/Commerce Cloud/gi, "")
+      .replace(/Data Cloud/gi, "")
+      .replace(/CRM Analytics/gi, "");
+
+    const levels = candidateProfileV2?.experienceLevels || {};
+    const products = candidateProfileV2?.productLevels || {};
+    const cats = new Set(candidateProfileV2?.roleCategories || []);
+
+    const isSalesforceCandidate =
+      result.includes("SALESFORCE_CRM") ||
+      cats.has("SALESFORCE_CRM") ||
+      products.salesforce === "implementation";
+
+    const hasRealCloudEvidence =
+      levels.cloud === "implementation" ||
+      /AWS|Azure|GCP|EC2|Lambda|DynamoDB|S3|REST API|WebAPI|サーバーレス|クラウド.*(設計|構築|運用|開発|実装)/i.test(cleanText);
+
+    const hasRealAiDataEvidence =
+      levels.aiData === "implementation" ||
+      /生成AI|LLM|LangChain|LangGraph|RAG|Azure OpenAI|OpenAI API|機械学習|MLOps|ベクトルDB|データ分析基盤|DWH|ETL|BI/i.test(cleanText);
+
+    if (!isSalesforceCandidate) return result;
+
+    return result.filter((domain) => {
+      if (domain === "CLOUD_APP_ENGINEER" && !hasRealCloudEvidence) return false;
+      if (domain === "AI_DATA_ENGINEER" && !hasRealAiDataEvidence) return false;
+      return true;
+    });
+  };
+
+  module.exports.__finalSalesforceOutputCleanupWrapped = true;
+}
