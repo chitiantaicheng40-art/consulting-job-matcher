@@ -160,9 +160,71 @@ function candidateText(candidate) {
     textOf(candidate?.candidateProfileV2?.evidence)
   ].join("\n");
 
-  const full = walk(candidate);
+  // Prefer explicit candidate/resume fields.
+  // Do not blindly walk the entire object when direct text exists,
+  // because route payloads can contain previous match results or job text.
+  if (direct.replace(/\s/g, "").length >= 80) {
+    return direct;
+  }
 
-  return [direct, full].filter(Boolean).join("\n");
+  function safeWalk(value, key = "", depth = 0) {
+    if (value == null || depth > 6) return "";
+
+    const k = String(key || "").toLowerCase();
+
+    const blockedKeys = [
+      "jobs",
+      "job",
+      "matches",
+      "match",
+      "recommendations",
+      "aiJobProfile",
+      "jobProfileV2",
+      "profileV2Scoring",
+      "domainFit",
+      "requiredMatched",
+      "requiredMissing",
+      "preferredMatched",
+      "preferredMissing",
+      "comment",
+      "reason",
+      "documentPassReason",
+      "recommendation_comment",
+      "title",
+      "position",
+      "company",
+      "url"
+    ];
+
+    if (blockedKeys.includes(k)) return "";
+
+    const allowedKey =
+      !k ||
+      /resume|candidate|raw|extracted|ocr|parsed|fulltext|profiletext|skill|project|experience|career|summary|education|qualification|certification|text/.test(k);
+
+    if (!allowedKey) return "";
+
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+    if (Array.isArray(value)) {
+      return value.map(v => safeWalk(v, key, depth + 1)).join("\n");
+    }
+
+    if (typeof value === "object") {
+      if (seen.has(value)) return "";
+      seen.add(value);
+
+      return Object.entries(value)
+        .map(([childKey, childValue]) => safeWalk(childValue, childKey, depth + 1))
+        .join("\n");
+    }
+
+    return "";
+  }
+
+  const fallback = safeWalk(candidate);
+  return [direct, fallback].filter(Boolean).join("\n");
 }
 
 function candidateYears(candidate) {
