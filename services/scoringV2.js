@@ -776,7 +776,35 @@ function buildMatchesV2(candidate, jobs, options = {}) {
         order: i + 1
       };
     })
-    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .sort((a, b) => {
+      const scoreDiff = Number(b.score || 0) - Number(a.score || 0);
+      if (scoreDiff !== 0) return scoreDiff;
+
+      const distanceRank = {
+        same: 4,
+        near: 3,
+        adjacent: 2,
+        far: 1
+      };
+
+      const aDistance = distanceRank[a.domainFit?.distance] || 0;
+      const bDistance = distanceRank[b.domainFit?.distance] || 0;
+      if (bDistance !== aDistance) return bDistance - aDistance;
+
+      const aRate = Number(a.profileV2Scoring?.requiredRate || a.requiredMatchRate || 0);
+      const bRate = Number(b.profileV2Scoring?.requiredRate || b.requiredMatchRate || 0);
+      if (bRate !== aRate) return bRate - aRate;
+
+      const aMissing = Array.isArray(a.requiredMissing) ? a.requiredMissing.length : 999;
+      const bMissing = Array.isArray(b.requiredMissing) ? b.requiredMissing.length : 999;
+      if (aMissing !== bMissing) return aMissing - bMissing;
+
+      const aCap = Number(a.domainFit?.cap || 0);
+      const bCap = Number(b.domainFit?.cap || 0);
+      if (bCap !== aCap) return bCap - aCap;
+
+      return 0;
+    })
     .map((m, i) => ({
       ...m,
       rankNo: i + 1,
