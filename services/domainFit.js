@@ -165,8 +165,25 @@ function classifyJobDomain(jobText, jobProfileV2) {
   }
 
   // Consulting / delivery domains.
-  if (has(titleAndReq, "メインフレーム|PL/I|PLI|COBOL|JCL|勘定系|基幹システム|レガシー|ホスト|バッチ処理|オンライン処理|モダナイゼーション|マイグレーション")) {
-    addScore(scores, DOMAIN.MAINFRAME_LEGACY_ENGINEER, 90, "mainframe/legacy modernization evidence");
+  // Mainframe / legacy banking should require strong legacy evidence.
+  // Do not classify generic modernization, AMO, QA, government, or package projects as mainframe.
+  const hasStrongMainframeEvidence = has(
+    titleAndReq,
+    "メインフレーム|PL/I|PLI|COBOL|JCL|ホスト|勘定系|預金|為替|融資|夜間バッチ|銀行向け基幹"
+  );
+
+  const hasWeakLegacyEvidence = has(
+    titleAndReq,
+    "基幹システム|レガシー|バッチ処理|オンライン処理|モダナイゼーション|マイグレーション"
+  );
+
+  const hasBankingContext = has(
+    titleAndReq,
+    "銀行|金融|勘定系|預金|為替|融資|決済"
+  );
+
+  if (hasStrongMainframeEvidence || (hasWeakLegacyEvidence && hasBankingContext)) {
+    addScore(scores, DOMAIN.MAINFRAME_LEGACY_ENGINEER, 90, "mainframe/legacy banking evidence");
   }
 
   if (has(titleAndReq, "金融プラットフォーム|銀行|バンキング|金融|決済|勘定系")) {

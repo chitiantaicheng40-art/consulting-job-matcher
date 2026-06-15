@@ -434,6 +434,19 @@ function scoreJob(candidate, job, cachedProfile) {
   let cap = 100;
 
   cap = Math.min(cap, domainFit.cap);
+
+  // DomainFit should not only cap mismatches; it should also rank closer jobs higher.
+  if (domainFit.distance === "same") {
+    score += 8;
+    notes.push("DomainFit距離：sameのため加点");
+  } else if (domainFit.distance === "near") {
+    score += 3;
+    notes.push("DomainFit距離：nearのため微加点");
+  } else if (domainFit.distance === "far") {
+    score -= 10;
+    notes.push("DomainFit距離：farのため減点");
+  }
+
   notes.push(domainFit.reason);
 
   if (has(jobText, "AIアーキテクト|データサイエンティスト|生成AI|LLM|機械学習") && !cCats.has("AI_ENGINEER") && !cCats.has("DATA_SCIENCE")) {
