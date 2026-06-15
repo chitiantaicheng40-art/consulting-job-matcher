@@ -800,9 +800,9 @@ function scoreJob(candidate, job, cachedProfile) {
   // Final safety cap: if no structured required criteria were extracted,
   // keep the job as reference-only and prevent A-rank recommendations.
   if (!requiredTotal) {
-    cap = Math.min(cap, 65);
-    score = Math.min(score, 65);
-    notes.push("必須条件の構造化情報が不足しているため、参考評価として上限65点に抑制");
+    cap = Math.min(cap, 58);
+    score = Math.min(score, 58);
+    notes.push("必須条件の構造化情報が不足しているため、参考評価として上限58点に抑制");
   }
 
   score = Math.round(score);
@@ -853,7 +853,7 @@ function scoreJob(candidate, job, cachedProfile) {
     comment: [
       `Profile v2判定：${score}点。`,
       matchedCategories.length ? `一致カテゴリ：${matchedCategories.join(" / ")}` : "一致カテゴリは限定的です。",
-      requiredTotal ? `必須一致率：${requiredRate}%（${requiredMatched.length}/${requiredTotal}）` : "必須条件の構造化情報が不足しているため、参考評価として上限65点に抑制。",
+      requiredTotal ? `必須一致率：${requiredRate}%（${requiredMatched.length}/${requiredTotal}）` : "必須条件の構造化情報が不足しているため、参考評価として上限58点に抑制。",
       notes.join("。")
     ].filter(Boolean).join(" ")
   };
