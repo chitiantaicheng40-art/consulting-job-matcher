@@ -304,8 +304,8 @@ function matchRequirement(req, ctx) {
 
   // Specific product/domain requirements must be judged before generic "開発/設計/テスト".
   // Otherwise "Unreal Engineを活用したコンテンツ開発経験" is wrongly matched by generic development experience.
-  if (has(r, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR")) {
-    return has(cText, "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR");
+  if (has(r, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|\\bXR\\b|\\bVR\\b|\\bAR\\b")) {
+    return has(cText, "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|\\bXR\\b|\\bVR\\b|\\bAR\\b");
   }
 
   if (has(r, "ServiceNow")) {
@@ -652,7 +652,7 @@ function scoreJob(candidate, job, cachedProfile) {
     notes.push("SCM/サプライチェーン求人だが候補者に該当領域経験なし");
   }
 
-  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|ゲーム|3D|XR|VR|AR") && !has(cText, "Unreal|Unity|ゲーム|3D|XR|VR|AR")) {
+  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|ゲーム|3D|\\bXR\\b|\\bVR\\b|\\bAR\\b") && !has(cText, "Unreal|Unity|ゲーム|3D|\\bXR\\b|\\bVR\\b|\\bAR\\b")) {
     cap = Math.min(cap, 30);
     notes.push("Unreal/Unity/リアルタイム開発求人だが候補者に該当経験なし");
   }
@@ -691,7 +691,7 @@ function scoreJob(candidate, job, cachedProfile) {
   }
 
   // Hard caps for specialist jobs when candidate-side evidence is missing.
-  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR") && !has(cText, "Unreal|Unity|3DCG|ゲーム|XR|VR|AR")) {
+  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|\\bXR\\b|\\bVR\\b|\\bAR\\b") && !has(cText, "Unreal|Unity|3DCG|ゲーム|\\bXR\\b|\\bVR\\b|\\bAR\\b")) {
     cap = Math.min(cap, 25);
     notes.push("Unreal/Unity/3DCG求人だが候補者に該当経験なし");
   }
@@ -718,7 +718,7 @@ function scoreJob(candidate, job, cachedProfile) {
   }
 
   // Strong hard cap for creative/realtime engine jobs.
-  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR") && !has(cText, "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|XR|VR|AR")) {
+  if (has(jobText, "Unreal Engine|Unity|リアルタイムソフトウェア|3DCG|ゲーム|\\bXR\\b|\\bVR\\b|\\bAR\\b") && !has(cText, "Unreal|Unity|リアルタイムソフトウェア|3DCG|ゲーム|\\bXR\\b|\\bVR\\b|\\bAR\\b")) {
     cap = Math.min(cap, 25);
     notes.push("Unreal/Unity/3DCG/リアルタイム開発求人だが候補者に該当経験なし");
   }
