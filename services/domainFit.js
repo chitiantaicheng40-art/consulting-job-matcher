@@ -104,9 +104,16 @@ function classifyCandidateDomain(candidateProfileV2, candidateText) {
     addScore(scores, DOMAIN.AI_DATA_ENGINEER, 60, "AI/data implementation");
   }
 
+  const hasCloudStudyOnly =
+    has(t, "AWS認定|ソリューションアーキテクト|資格取得|学習|自己研鑽|参考書") &&
+    !has(t, "AWS.*設計|AWS.*構築|AWS.*運用|Azure.*設計|Azure.*構築|GCP.*設計|クラウド.*設計|クラウド.*構築|REST API|WebAPI|サーバーレス|EC2|Lambda|DynamoDB|S3");
+
   if (
-    cats.has("CLOUD_APP_ENGINEER") ||
-    (has(t, "AWS|Azure|GCP|クラウド|Cloud") && has(t, "REST API|WebAPI|API実装|Webシステム|アプリ|システム開発|Python|Node.js|Go"))
+    !hasCloudStudyOnly &&
+    (
+      cats.has("CLOUD_APP_ENGINEER") ||
+      (has(t, "AWS|Azure|GCP|クラウド|Cloud") && has(t, "REST API|WebAPI|API実装|Webシステム|アプリ|システム開発|Python|Node.js|Go|設計|構築|運用"))
+    )
   ) {
     addScore(scores, DOMAIN.CLOUD_APP_ENGINEER, 90, "cloud application/API implementation");
   }

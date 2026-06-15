@@ -256,6 +256,15 @@ function normalizeCandidateProfileV2(candidate) {
     primaryRole = "Software Engineer";
   }
 
+  // Cloud certification study alone should not be treated as cloud application engineering experience.
+  const hasCloudStudyOnly =
+    has(text, /AWS認定|ソリューションアーキテクト|資格取得|学習|自己研鑽|参考書/i) &&
+    !has(text, /AWS.*(設計|構築|運用|開発|実装)|Azure.*(設計|構築|運用|開発|実装)|GCP.*(設計|構築|運用|開発|実装)|クラウド.*(設計|構築|運用|開発|実装)|REST API|WebAPI|サーバーレス|EC2|Lambda|DynamoDB|S3/i);
+
+  if (hasCloudStudyOnly) {
+    roleCategories.delete("CLOUD_APP_ENGINEER");
+  }
+
   return {
     version: "v2",
     primaryRole,
