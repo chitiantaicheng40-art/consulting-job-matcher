@@ -390,8 +390,20 @@ function matchRequirement(req, ctx) {
     return cCats.has("EMBEDDED_IOT") || products.embedded === "implementation";
   }
 
-  // Salesforce / SAP / Oracle ERP
-  if (has(r, "Salesforce|CRM|CX")) return cCats.has("SALESFORCE_CRM") || products.salesforce === "implementation";
+  // Product-specific CRM matching.
+  // Dynamics 365 and Salesforce are adjacent CRM products, but should not satisfy each other's strict required criteria.
+  if (has(r, "Dynamics 365|D365|Finance and Operations|Customer Service|Power Platform|Dataverse|Power Apps|Power Automate")) {
+    return products.dynamics === "implementation";
+  }
+
+  if (has(r, "Salesforce|Service Cloud|Sales Cloud|Experience Cloud|Apex|SOQL|Lightning")) {
+    return cCats.has("SALESFORCE_CRM") || products.salesforce === "implementation";
+  }
+
+  // Generic CRM/CX requirement can be matched by CRM experience broadly.
+  if (has(r, "CRM|CX|MAツール|顧客接点|顧客体験")) {
+    return cCats.has("SALESFORCE_CRM") || products.salesforce === "implementation" || products.dynamics === "implementation";
+  }
   if (has(r, "S/4HANA|SAP|ABAP|Basis|Ariba|SuccessFactors")) return cCats.has("SAP_SPECIALIST") || products.sap === "implementation";
   if (has(r, "Oracle Fusion|Oracle ERP|Oracle Cloud ERP|EPM|SCM Cloud|HCM Cloud")) return cCats.has("ORACLE_ERP") || products.oracle === "implementation";
 
@@ -785,6 +797,18 @@ function scoreJob(candidate, job, cachedProfile) {
   ) {
     cap = Math.min(cap, 58);
     notes.push("人事/人的資本領域求人だが候補者にHR領域経験なし");
+  }
+
+  const isDynamicsRequiredJob = has(jobText, "Dynamics 365|D365|Finance and Operations|Customer Service|Power Platform|Dataverse|Power Apps|Power Automate");
+  const hasDynamicsCandidateExperience = products.dynamics === "implementation" || has(cText, "Dynamics 365|D365|Power Platform|Dataverse|Power Apps|Power Automate|Finance and Operations|Customer Service");
+
+  if (
+    isDynamicsRequiredJob &&
+    !hasDynamicsCandidateExperience &&
+    cCats.has("SALESFORCE_CRM")
+  ) {
+    cap = Math.min(cap, 65);
+    notes.push("Dynamics 365必須求人だが候補者はSalesforce/CRM経験中心のため上限65");
   }
 
   // Salesforce/CRM primary candidates should not be highly ranked for unrelated specialist domains.

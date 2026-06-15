@@ -168,7 +168,7 @@ function classifyJobDomain(jobText, jobProfileV2) {
     addScore(scores, DOMAIN.ORACLE_ERP, 90, "Oracle ERP evidence");
   }
 
-  if (has(titleAndReq, "Dynamics 365|Power Platform|Microsoft リーダークラス")) {
+  if (has(titleAndReq, "Dynamics 365|D365|Power Platform|Dataverse|Power Apps|Power Automate|Microsoft リーダークラス")) {
     addScore(scores, DOMAIN.ORACLE_ERP, 75, "enterprise package evidence");
   }
 
